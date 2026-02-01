@@ -3,9 +3,13 @@
 import os
 import sys
 
-# Disable GPU acceleration for QtWebEngine (fixes WSL2/Wayland issues)
+# Configure QtWebEngine for WSL2/Wayland compatibility
+# Use software WebGL rendering to avoid Vulkan issues while keeping WebGL working
 # Must be set before importing Qt
-os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
+os.environ.setdefault(
+    "QTWEBENGINE_CHROMIUM_FLAGS",
+    "--disable-gpu-compositing --use-gl=angle --use-angle=swiftshader"
+)
 
 from PyQt6.QtWidgets import QApplication
 
