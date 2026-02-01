@@ -1,6 +1,11 @@
 """Application entry point for DesignCampaign."""
 
+import os
 import sys
+
+# Disable GPU acceleration for QtWebEngine (fixes WSL2/Wayland issues)
+# Must be set before importing Qt
+os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 
 from PyQt6.QtWidgets import QApplication
 
@@ -9,6 +14,11 @@ from src.ui.main_window import MainWindow
 
 def main():
     """Run the DesignCampaign application."""
+    # Additional fallback for software rendering if needed
+    if "--software-rendering" in sys.argv:
+        os.environ["QT_QUICK_BACKEND"] = "software"
+        sys.argv.remove("--software-rendering")
+
     app = QApplication(sys.argv)
 
     # Set application metadata
