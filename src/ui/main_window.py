@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import (
     QStatusBar,
     QMenuBar,
     QFileDialog,
+    QTabWidget,
+    QMessageBox,
 )
 
 from src.config.settings import (
@@ -25,8 +27,10 @@ from src.config.settings import (
 from src.ui.file_list import FileListWidget
 from src.ui.viewer import ProteinViewer
 from src.ui.selection_panel import SelectionPanel
+from src.ui.metrics_table import MetricsTableWidget
 from src.models.protein import Protein
 from src.models.metrics import MetricResult
+from src.models.metrics_store import MetricsStore, ProteinMetrics
 
 
 class MetricCalculationWorker(QThread):
@@ -48,14 +52,44 @@ class MetricCalculationWorker(QThread):
             self.error.emit(str(e))
 
 
+class BatchMetricWorker(QThread):
+    """Worker thread for calculating metrics for multiple proteins."""
+
+    progress = pyqtSignal(int, int)  # current, total
+    protein_done = pyqtSignal(str, object)  # name, MetricResult
+    finished = pyqtSignal()
+    error = pyqtSignal(str, str)  # protein name, error message
+
+    def __init__(self, file_paths: list[str], metric_name: str):
+        super().__init__()
+        self._file_paths = file_paths
+        self._metric_name = metric_name
+
+    def run(self):
+        total = len(self._file_paths)
+        for i, file_path in enumerate(self._file_paths):
+            self.progress.emit(i + 1, total)
+            try:
+                protein = Protein(file_path)
+                result = protein.calculate_metric(self._metric_name)
+                self.protein_done.emit(protein.name, result)
+            except Exception as e:
+                name = Path(file_path).stem
+                self.error.emit(name, str(e))
+        self.finished.emit()
+
+
 class MainWindow(QMainWindow):
-    """Main application window with file list, protein viewer, and selection panel."""
+    """Main application window with file list, metrics table, protein viewer, and selection panel."""
 
     def __init__(self):
         """Initialize the main window."""
         super().__init__()
         self._current_protein: Protein | None = None
+        self._current_folder: str | None = None
         self._metric_worker: MetricCalculationWorker | None = None
+        self._batch_worker: BatchMetricWorker | None = None
+        self._metrics_store = MetricsStore()
         self._init_ui()
         self._init_menu()
         self._init_statusbar()
@@ -72,12 +106,21 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central_widget)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Horizontal splitter for left (file list), center (viewer), right (panel)
+        # Horizontal splitter for left (tabs), center (viewer), right (panel)
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left panel: File list
+        # Left panel: Tabbed file list and metrics table
+        self._left_tabs = QTabWidget()
+
+        # File list tab
         self._file_list = FileListWidget()
-        self._splitter.addWidget(self._file_list)
+        self._left_tabs.addTab(self._file_list, "Files")
+
+        # Metrics table tab
+        self._metrics_table = MetricsTableWidget()
+        self._left_tabs.addTab(self._metrics_table, "Metrics")
+
+        self._splitter.addWidget(self._left_tabs)
 
         # Center: Protein viewer
         self._viewer = ProteinViewer()
@@ -87,9 +130,9 @@ class MainWindow(QMainWindow):
         self._selection_panel = SelectionPanel()
         self._splitter.addWidget(self._selection_panel)
 
-        # Set initial splitter sizes (20% left, 60% center, 20% right)
+        # Set initial splitter sizes (25% left, 55% center, 20% right)
         total_width = DEFAULT_WINDOW_WIDTH
-        left_width = int(total_width * 0.20)
+        left_width = int(total_width * 0.25)
         right_width = int(total_width * 0.20)
         center_width = total_width - left_width - right_width
         self._splitter.setSizes([left_width, center_width, right_width])
@@ -117,11 +160,64 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        # Import submenu
+        import_menu = file_menu.addMenu("&Import Metrics")
+
+        import_csv_action = QAction("From &CSV...", self)
+        import_csv_action.setStatusTip("Import metrics from a CSV file")
+        import_csv_action.triggered.connect(self._on_import_csv)
+        import_menu.addAction(import_csv_action)
+
+        import_json_action = QAction("From &JSON...", self)
+        import_json_action.setStatusTip("Import metrics from a JSON file")
+        import_json_action.triggered.connect(self._on_import_json)
+        import_menu.addAction(import_json_action)
+
+        # Export submenu
+        export_menu = file_menu.addMenu("&Export Metrics")
+
+        export_csv_action = QAction("To &CSV...", self)
+        export_csv_action.setStatusTip("Export metrics to a CSV file")
+        export_csv_action.triggered.connect(self._on_export_csv)
+        export_menu.addAction(export_csv_action)
+
+        export_json_action = QAction("To &JSON...", self)
+        export_json_action.setStatusTip("Export metrics to a JSON file")
+        export_json_action.triggered.connect(self._on_export_json)
+        export_menu.addAction(export_json_action)
+
+        file_menu.addSeparator()
+
         quit_action = QAction("&Quit", self)
         quit_action.setShortcut(QKeySequence("Ctrl+Q"))
         quit_action.setStatusTip("Exit the application")
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
+
+        # Metrics menu
+        metrics_menu = menubar.addMenu("&Metrics")
+
+        calc_rasa_action = QAction("Calculate &RASA for All...", self)
+        calc_rasa_action.setStatusTip("Calculate RASA for all proteins in folder")
+        calc_rasa_action.triggered.connect(lambda: self._on_batch_calculate("rasa"))
+        metrics_menu.addAction(calc_rasa_action)
+
+        calc_plddt_action = QAction("Extract &pLDDT for All...", self)
+        calc_plddt_action.setStatusTip("Extract pLDDT for all proteins in folder")
+        calc_plddt_action.triggered.connect(lambda: self._on_batch_calculate("plddt"))
+        metrics_menu.addAction(calc_plddt_action)
+
+        calc_bfactor_action = QAction("Extract &B-factor for All...", self)
+        calc_bfactor_action.setStatusTip("Extract B-factor for all proteins in folder")
+        calc_bfactor_action.triggered.connect(lambda: self._on_batch_calculate("bfactor"))
+        metrics_menu.addAction(calc_bfactor_action)
+
+        metrics_menu.addSeparator()
+
+        clear_metrics_action = QAction("&Clear All Metrics", self)
+        clear_metrics_action.setStatusTip("Clear all metrics data")
+        clear_metrics_action.triggered.connect(self._on_clear_metrics)
+        metrics_menu.addAction(clear_metrics_action)
 
         # View menu
         view_menu = menubar.addMenu("&View")
@@ -205,6 +301,10 @@ class MainWindow(QMainWindow):
         self._selection_panel.color_scheme_changed.connect(self._on_color_scheme_changed)
         self._selection_panel.metric_coloring_requested.connect(self._on_metric_coloring_requested)
 
+        # Connect metrics table signals
+        self._metrics_table.protein_selected.connect(self._on_metrics_protein_selected)
+        self._metrics_table.protein_double_clicked.connect(self._on_metrics_protein_double_clicked)
+
     def _on_open_folder(self):
         """Handle File > Open Folder action."""
         folder = QFileDialog.getExistingDirectory(
@@ -214,6 +314,7 @@ class MainWindow(QMainWindow):
             QFileDialog.Option.ShowDirsOnly,
         )
         if folder:
+            self._current_folder = folder
             self._file_list.load_folder(folder)
 
     def _on_refresh(self):
@@ -233,6 +334,14 @@ class MainWindow(QMainWindow):
         Args:
             file_path: Path to the selected file.
         """
+        self._load_protein(file_path)
+
+    def _load_protein(self, file_path: str) -> None:
+        """Load a protein from file path.
+
+        Args:
+            file_path: Path to the protein structure file.
+        """
         self._statusbar.showMessage(f"Loading: {file_path}")
         self._viewer.load_structure(file_path)
 
@@ -251,6 +360,7 @@ class MainWindow(QMainWindow):
         Args:
             folder_path: Path to the new folder.
         """
+        self._current_folder = folder_path
         count = self._file_list.file_count
         self._statusbar.showMessage(f"Loaded {count} file(s) from {folder_path}")
 
@@ -390,6 +500,224 @@ class MainWindow(QMainWindow):
         self._selection_panel.set_calculating(False)
         self._statusbar.showMessage(f"Metric calculation failed: {message}")
 
+    # Metrics table handlers
+
+    def _on_metrics_protein_selected(self, name: str):
+        """Handle protein selection in metrics table.
+
+        Args:
+            name: Protein name.
+        """
+        self._statusbar.showMessage(f"Selected: {name}")
+
+    def _on_metrics_protein_double_clicked(self, name: str):
+        """Handle protein double-click in metrics table.
+
+        Args:
+            name: Protein name.
+        """
+        # Try to find and load the protein file
+        protein_data = self._metrics_store.get_protein(name)
+        if protein_data and protein_data.file_path:
+            self._load_protein(protein_data.file_path)
+        elif self._current_folder:
+            # Try to find in current folder
+            for ext in [".pdb", ".cif"]:
+                file_path = Path(self._current_folder) / f"{name}{ext}"
+                if file_path.exists():
+                    self._load_protein(str(file_path))
+                    return
+            self._statusbar.showMessage(f"Could not find structure file for {name}")
+
+    # Import/Export handlers
+
+    def _on_import_csv(self):
+        """Handle Import > CSV action."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Metrics from CSV",
+            "",
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if file_path:
+            try:
+                count = self._metrics_store.load_csv(file_path)
+                self._metrics_table.set_store(self._metrics_store)
+                self._left_tabs.setCurrentWidget(self._metrics_table)
+                self._statusbar.showMessage(f"Imported {count} proteins from CSV")
+            except Exception as e:
+                QMessageBox.critical(self, "Import Error", f"Failed to import CSV: {e}")
+
+    def _on_import_json(self):
+        """Handle Import > JSON action."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Metrics from JSON",
+            "",
+            "JSON Files (*.json);;All Files (*)",
+        )
+        if file_path:
+            try:
+                count = self._metrics_store.load_json(file_path)
+                self._metrics_table.set_store(self._metrics_store)
+                self._left_tabs.setCurrentWidget(self._metrics_table)
+                self._statusbar.showMessage(f"Imported {count} proteins from JSON")
+            except Exception as e:
+                QMessageBox.critical(self, "Import Error", f"Failed to import JSON: {e}")
+
+    def _on_export_csv(self):
+        """Handle Export > CSV action."""
+        if self._metrics_store.count == 0:
+            QMessageBox.warning(self, "Export", "No metrics data to export")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Metrics to CSV",
+            "",
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if file_path:
+            try:
+                self._metrics_store.save_csv(file_path)
+                self._statusbar.showMessage(f"Exported metrics to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export CSV: {e}")
+
+    def _on_export_json(self):
+        """Handle Export > JSON action."""
+        if self._metrics_store.count == 0:
+            QMessageBox.warning(self, "Export", "No metrics data to export")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Metrics to JSON",
+            "",
+            "JSON Files (*.json);;All Files (*)",
+        )
+        if file_path:
+            try:
+                self._metrics_store.save_json(file_path)
+                self._statusbar.showMessage(f"Exported metrics to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export JSON: {e}")
+
+    def _on_batch_calculate(self, metric_name: str):
+        """Handle batch metric calculation for all proteins in folder.
+
+        Args:
+            metric_name: Name of the metric to calculate.
+        """
+        if not self._current_folder:
+            QMessageBox.warning(
+                self,
+                "No Folder Selected",
+                "Please open a folder with protein files first."
+            )
+            return
+
+        # Get list of protein files
+        file_paths = self._file_list.get_all_file_paths()
+        if not file_paths:
+            QMessageBox.warning(self, "No Files", "No protein files found in folder")
+            return
+
+        # Confirm calculation
+        result = QMessageBox.question(
+            self,
+            "Calculate Metrics",
+            f"Calculate {metric_name.upper()} for {len(file_paths)} proteins?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        # Start batch calculation
+        self._batch_worker = BatchMetricWorker(file_paths, metric_name)
+        self._batch_worker.progress.connect(self._on_batch_progress)
+        self._batch_worker.protein_done.connect(
+            lambda name, res: self._on_batch_protein_done(name, res, metric_name)
+        )
+        self._batch_worker.error.connect(self._on_batch_error)
+        self._batch_worker.finished.connect(self._on_batch_finished)
+        self._batch_worker.start()
+
+        self._statusbar.showMessage(f"Calculating {metric_name}...")
+
+    def _on_batch_progress(self, current: int, total: int):
+        """Handle batch calculation progress.
+
+        Args:
+            current: Current protein index.
+            total: Total proteins.
+        """
+        self._statusbar.showMessage(f"Calculating metrics: {current}/{total}")
+
+    def _on_batch_protein_done(self, name: str, result: MetricResult, metric_name: str):
+        """Handle completion of a single protein metric calculation.
+
+        Args:
+            name: Protein name.
+            result: MetricResult for the protein.
+            metric_name: Name of the metric.
+        """
+        # Get or create protein in store
+        protein = self._metrics_store.get_protein(name)
+        if protein is None:
+            # Find the file path
+            file_path = None
+            if self._current_folder:
+                for ext in [".pdb", ".cif"]:
+                    path = Path(self._current_folder) / f"{name}{ext}"
+                    if path.exists():
+                        file_path = str(path)
+                        break
+            protein = ProteinMetrics(name=name, file_path=file_path)
+
+        # Store mean value for the protein
+        if result.values:
+            mean_val = sum(result.values.values()) / len(result.values)
+            protein.set_metric(f"{metric_name}_mean", mean_val)
+            protein.set_metric(f"{metric_name}_min", result.min_value)
+            protein.set_metric(f"{metric_name}_max", result.max_value)
+
+        self._metrics_store.add_protein(protein)
+
+    def _on_batch_error(self, name: str, message: str):
+        """Handle batch calculation error for a single protein.
+
+        Args:
+            name: Protein name.
+            message: Error message.
+        """
+        # Log error but continue with other proteins
+        pass
+
+    def _on_batch_finished(self):
+        """Handle batch calculation completion."""
+        self._metrics_table.set_store(self._metrics_store)
+        self._left_tabs.setCurrentWidget(self._metrics_table)
+        self._statusbar.showMessage(
+            f"Calculated metrics for {self._metrics_store.count} proteins"
+        )
+
+    def _on_clear_metrics(self):
+        """Handle Clear All Metrics action."""
+        if self._metrics_store.count == 0:
+            return
+
+        result = QMessageBox.question(
+            self,
+            "Clear Metrics",
+            f"Clear metrics for {self._metrics_store.count} proteins?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            self._metrics_store.clear()
+            self._metrics_table.refresh()
+            self._statusbar.showMessage("Metrics cleared")
+
     @property
     def file_list(self) -> FileListWidget:
         """Get the file list widget."""
@@ -404,3 +732,13 @@ class MainWindow(QMainWindow):
     def selection_panel(self) -> SelectionPanel:
         """Get the selection panel widget."""
         return self._selection_panel
+
+    @property
+    def metrics_table(self) -> MetricsTableWidget:
+        """Get the metrics table widget."""
+        return self._metrics_table
+
+    @property
+    def metrics_store(self) -> MetricsStore:
+        """Get the metrics store."""
+        return self._metrics_store

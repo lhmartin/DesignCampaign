@@ -191,3 +191,11 @@ class FileListWidget(QWidget):
     def file_count(self) -> int:
         """Get the number of files in the current folder."""
         return len(self._files)
+
+    def get_all_file_paths(self) -> list[str]:
+        """Get all file paths in the current folder.
+
+        Returns:
+            List of file path strings.
+        """
+        return [str(f) for f in self._files]
