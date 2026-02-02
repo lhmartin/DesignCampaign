@@ -85,10 +85,12 @@ def calculate_rasa(structure: AtomArray) -> MetricResult:
     residue_names_map: dict[int, str] = {}
 
     for i, (res_id, res_name) in enumerate(zip(aa_structure.res_id, aa_structure.res_name)):
-        if res_id not in residue_sasa:
-            residue_sasa[res_id] = 0.0
-            residue_names_map[res_id] = res_name
-        residue_sasa[res_id] += atom_sasa[i]
+        # Convert numpy.int64 to Python int for JSON serialization
+        res_id_int = int(res_id)
+        if res_id_int not in residue_sasa:
+            residue_sasa[res_id_int] = 0.0
+            residue_names_map[res_id_int] = res_name
+        residue_sasa[res_id_int] += atom_sasa[i]
 
     # Calculate relative ASA
     rasa_values: dict[int, float] = {}
@@ -96,7 +98,8 @@ def calculate_rasa(structure: AtomArray) -> MetricResult:
         res_name = residue_names_map[res_id]
         max_asa = MAX_ASA.get(res_name, 200.0)  # Default for non-standard
         rasa = min(total_sasa / max_asa, 1.0) if max_asa > 0 else 0.0
-        rasa_values[res_id] = rasa
+        # Convert to Python float for JSON serialization
+        rasa_values[res_id] = float(rasa)
 
     values_list = list(rasa_values.values())
     return MetricResult(
