@@ -80,15 +80,17 @@ def calculate_rasa(structure: AtomArray) -> MetricResult:
     atom_sasa = sasa(aa_structure)
 
     # Aggregate SASA per residue
+    # Use int() to convert numpy.int64 to Python int for JSON serialization
     residue_ids, residue_names = get_residues(aa_structure)
     residue_sasa: dict[int, float] = {}
     residue_names_map: dict[int, str] = {}
 
     for i, (res_id, res_name) in enumerate(zip(aa_structure.res_id, aa_structure.res_name)):
-        if res_id not in residue_sasa:
-            residue_sasa[res_id] = 0.0
-            residue_names_map[res_id] = res_name
-        residue_sasa[res_id] += atom_sasa[i]
+        res_id_int = int(res_id)
+        if res_id_int not in residue_sasa:
+            residue_sasa[res_id_int] = 0.0
+            residue_names_map[res_id_int] = res_name
+        residue_sasa[res_id_int] += atom_sasa[i]
 
     # Calculate relative ASA
     rasa_values: dict[int, float] = {}
@@ -96,7 +98,7 @@ def calculate_rasa(structure: AtomArray) -> MetricResult:
         res_name = residue_names_map[res_id]
         max_asa = MAX_ASA.get(res_name, 200.0)  # Default for non-standard
         rasa = min(total_sasa / max_asa, 1.0) if max_asa > 0 else 0.0
-        rasa_values[res_id] = rasa
+        rasa_values[res_id] = float(rasa)
 
     values_list = list(rasa_values.values())
     return MetricResult(
@@ -144,6 +146,7 @@ def extract_plddt(structure: AtomArray) -> MetricResult:
         )
 
     # Get CA atoms for per-residue pLDDT
+    # Use int() to convert numpy.int64 to Python int for JSON serialization
     ca_mask = aa_structure.atom_name == "CA"
     ca_atoms = aa_structure[ca_mask]
 
@@ -199,15 +202,16 @@ def extract_bfactor(structure: AtomArray) -> MetricResult:
         )
 
     # Average B-factor per residue
+    # Use int() to convert numpy.int64 to Python int for JSON serialization
     residue_bfactors: dict[int, list[float]] = {}
     for res_id, b_factor in zip(aa_structure.res_id, aa_structure.b_factor):
-        res_id = int(res_id)
-        if res_id not in residue_bfactors:
-            residue_bfactors[res_id] = []
-        residue_bfactors[res_id].append(float(b_factor))
+        res_id_int = int(res_id)
+        if res_id_int not in residue_bfactors:
+            residue_bfactors[res_id_int] = []
+        residue_bfactors[res_id_int].append(float(b_factor))
 
     bfactor_values: dict[int, float] = {
-        res_id: np.mean(bfs) for res_id, bfs in residue_bfactors.items()
+        res_id: float(np.mean(bfs)) for res_id, bfs in residue_bfactors.items()
     }
 
     values_list = list(bfactor_values.values())
