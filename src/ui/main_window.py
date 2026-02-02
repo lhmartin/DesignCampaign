@@ -300,6 +300,9 @@ class MainWindow(QMainWindow):
         self._selection_panel.selection_requested.connect(self._on_selection_requested)
         self._selection_panel.color_scheme_changed.connect(self._on_color_scheme_changed)
         self._selection_panel.metric_coloring_requested.connect(self._on_metric_coloring_requested)
+        self._selection_panel.interface_requested.connect(self._on_interface_requested)
+        self._selection_panel.select_interface_requested.connect(self._on_select_interface)
+        self._selection_panel.export_selection_requested.connect(self._on_export_selection)
 
         # Connect metrics table signals
         self._metrics_table.protein_selected.connect(self._on_metrics_protein_selected)
@@ -380,6 +383,10 @@ class MainWindow(QMainWindow):
             num_residues = self._current_protein.get_num_residues()
             self._selection_panel.set_selection_count(0, num_residues)
 
+            # Load sequence into viewer
+            sequence = self._current_protein.get_sequence()
+            self._viewer.set_sequence(sequence)
+
     def _on_error(self, message: str):
         """Handle error from viewer.
 
@@ -397,6 +404,10 @@ class MainWindow(QMainWindow):
         if self._current_protein:
             total = self._current_protein.get_num_residues()
             self._selection_panel.set_selection_count(len(residue_ids), total)
+            self._selection_panel.set_selected_residues(residue_ids)
+
+        # Sync to sequence viewer
+        self._viewer.sync_selection_to_sequence()
 
     def _on_selection_requested(self, action: str, params: Any):
         """Handle selection request from panel.
@@ -733,12 +744,116 @@ class MainWindow(QMainWindow):
         """Get the selection panel widget."""
         return self._selection_panel
 
-    @property
-    def metrics_table(self) -> MetricsTableWidget:
-        """Get the metrics table widget."""
-        return self._metrics_table
+    # Interface handlers
 
-    @property
-    def metrics_store(self) -> MetricsStore:
-        """Get the metrics store."""
-        return self._metrics_store
+    def _on_interface_requested(self, binder_chain: str, target_chains: list[str], cutoff: float):
+        """Handle interface calculation request.
+
+        Args:
+            binder_chain: Chain ID for the binder.
+            target_chains: List of chain IDs for the target.
+            cutoff: Distance cutoff in Angstroms.
+        """
+        if not self._current_protein:
+            self._statusbar.showMessage("No structure loaded")
+            return
+
+        self._statusbar.showMessage(f"Calculating interface ({binder_chain} vs {target_chains})...")
+
+        try:
+            interface = self._current_protein.get_interface_residues(
+                binder_chain=binder_chain,
+                target_chains=target_chains,
+                distance_cutoff=cutoff,
+            )
+
+            residue_ids = list(interface.keys())
+            self._selection_panel.set_interface_result(residue_ids)
+            self._viewer.set_interface_residues(residue_ids)
+
+            if residue_ids:
+                self._statusbar.showMessage(f"Found {len(residue_ids)} interface residues")
+            else:
+                self._statusbar.showMessage("No interface residues found at this cutoff")
+
+        except Exception as e:
+            self._statusbar.showMessage(f"Interface calculation failed: {e}")
+            self._selection_panel.set_interface_result([])
+
+    def _on_select_interface(self):
+        """Handle select interface residues request."""
+        interface_ids = self._selection_panel.get_interface_residues()
+        if interface_ids:
+            self._viewer.select_residues(interface_ids)
+            self._statusbar.showMessage(f"Selected {len(interface_ids)} interface residues")
+
+    # Export handlers
+
+    def _on_export_selection(self, format_type: str, file_path: str):
+        """Handle selection export request.
+
+        Args:
+            format_type: Export format ('fasta' or 'csv').
+            file_path: Output file path.
+        """
+        if not self._current_protein:
+            self._statusbar.showMessage("No structure loaded")
+            return
+
+        selected = self._viewer.selected_residues
+        if not selected:
+            self._statusbar.showMessage("No residues selected")
+            return
+
+        try:
+            sequence = self._current_protein.get_sequence()
+
+            # Filter to selected residues
+            selected_set = set(selected)
+            selected_residues = [r for r in sequence if r["id"] in selected_set]
+
+            if format_type == "fasta":
+                self._export_fasta(file_path, selected_residues)
+            else:
+                self._export_csv(file_path, selected_residues)
+
+            self._statusbar.showMessage(f"Exported {len(selected_residues)} residues to {file_path}")
+
+        except Exception as e:
+            self._statusbar.showMessage(f"Export failed: {e}")
+
+    def _export_fasta(self, file_path: str, residues: list[dict]) -> None:
+        """Export residues as FASTA format.
+
+        Args:
+            file_path: Output file path.
+            residues: List of residue dicts.
+        """
+        sequence = "".join(r["one_letter"] for r in residues)
+        name = self._current_protein.name if self._current_protein else "selection"
+
+        # Create FASTA header with residue range info
+        if residues:
+            first_id = residues[0]["id"]
+            last_id = residues[-1]["id"]
+            header = f">{name}_residues_{first_id}-{last_id}"
+        else:
+            header = f">{name}_selection"
+
+        with open(file_path, "w") as f:
+            f.write(f"{header}\n")
+            # Write sequence in lines of 60 characters
+            for i in range(0, len(sequence), 60):
+                f.write(f"{sequence[i:i+60]}\n")
+
+    def _export_csv(self, file_path: str, residues: list[dict]) -> None:
+        """Export residues as CSV format.
+
+        Args:
+            file_path: Output file path.
+            residues: List of residue dicts.
+        """
+        with open(file_path, "w") as f:
+            f.write("residue_id,chain,residue_name,one_letter\n")
+            for r in residues:
+                f.write(f"{r['id']},{r['chain']},{r['name']},{r['one_letter']}\n")
