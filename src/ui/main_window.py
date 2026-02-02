@@ -303,6 +303,8 @@ class MainWindow(QMainWindow):
         self._selection_panel.interface_requested.connect(self._on_interface_requested)
         self._selection_panel.select_interface_requested.connect(self._on_select_interface)
         self._selection_panel.export_selection_requested.connect(self._on_export_selection)
+        self._selection_panel.clear_interface_requested.connect(self._on_clear_interface_requested)
+        self._selection_panel.selection_color_requested.connect(self._on_selection_color_requested)
 
         # Connect metrics table signals
         self._metrics_table.protein_selected.connect(self._on_metrics_protein_selected)
@@ -789,6 +791,20 @@ class MainWindow(QMainWindow):
         if interface_ids:
             self._viewer.select_residues(interface_ids)
             self._statusbar.showMessage(f"Selected {len(interface_ids)} interface residues")
+
+    def _on_clear_interface_requested(self):
+        """Handle clear interface request."""
+        self._viewer.clear_interface()
+        self._statusbar.showMessage("Interface highlighting cleared")
+
+    def _on_selection_color_requested(self, color: str):
+        """Handle selection coloring request.
+
+        Args:
+            color: Hex color string (e.g., '#ff0000').
+        """
+        self._viewer.set_selection_color(color)
+        self._statusbar.showMessage(f"Applied color {color} to selection")
 
     # Export handlers
 
