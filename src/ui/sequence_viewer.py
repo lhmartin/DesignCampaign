@@ -4,6 +4,7 @@ This module provides a horizontal sequence viewer that displays amino acid
 sequences with selection support and synchronizes with the 3D viewer.
 """
 
+import logging
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
@@ -18,6 +19,8 @@ from PyQt6.QtWidgets import (
     QFrame,
     QSizePolicy,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ResidueCell(QWidget):
@@ -243,13 +246,17 @@ class SequenceViewer(QWidget):
         Args:
             sequence: List of residue dicts with 'id', 'one_letter', 'name', 'chain'.
         """
+        logger.debug(f"SequenceViewer.set_sequence: received {len(sequence) if sequence else 0} residues")
+
         # Clear existing cells
         self.clear()
 
         if not sequence:
+            logger.warning("SequenceViewer.set_sequence: sequence is empty or None")
             self._label.setText("No sequence loaded")
             return
 
+        logger.debug(f"SequenceViewer.set_sequence: first 3 residues = {sequence[:3]}")
         current_chain = None
 
         for res in sequence:
@@ -275,6 +282,7 @@ class SequenceViewer(QWidget):
             self._sequence_layout.addWidget(cell)
 
         self._sequence_layout.addStretch()
+        logger.debug(f"SequenceViewer.set_sequence: created {len(self._residue_cells)} residue cells")
 
         # Update label
         num_residues = len(self._residue_cells)

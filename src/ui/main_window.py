@@ -1,5 +1,6 @@
 """Main application window for DesignCampaign."""
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,8 @@ from src.ui.metrics_table import MetricsTableWidget
 from src.models.protein import Protein
 from src.models.metrics import MetricResult
 from src.models.metrics_store import MetricsStore, ProteinMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class MetricCalculationWorker(QThread):
@@ -347,6 +350,7 @@ class MainWindow(QMainWindow):
         Args:
             file_path: Path to the protein structure file.
         """
+        logger.debug(f"MainWindow._load_protein: loading {file_path}")
         self._statusbar.showMessage(f"Loading: {file_path}")
 
         # Load protein model FIRST (before viewer emits structure_loaded signal)
@@ -355,11 +359,14 @@ class MainWindow(QMainWindow):
             self._current_protein = Protein(file_path)
             # Pre-load structure for faster metric calculation
             _ = self._current_protein.structure
+            logger.debug(f"MainWindow._load_protein: Protein model created successfully")
         except Exception as e:
+            logger.error(f"MainWindow._load_protein: failed to create Protein model: {e}")
             self._statusbar.showMessage(f"Warning: Could not load structure model: {e}")
             self._current_protein = None
 
         # Now load in viewer (structure_loaded signal will have valid _current_protein)
+        logger.debug(f"MainWindow._load_protein: calling viewer.load_structure()")
         self._viewer.load_structure(file_path)
 
     def _on_folder_changed(self, folder_path: str):
@@ -378,19 +385,29 @@ class MainWindow(QMainWindow):
         Args:
             file_path: Path to the loaded structure.
         """
+        logger.debug(f"MainWindow._on_structure_loaded: received signal for {file_path}")
+        logger.debug(f"MainWindow._on_structure_loaded: _current_protein is {'set' if self._current_protein else 'None'}")
         self._statusbar.showMessage(f"Loaded: {file_path}")
 
         # Update selection panel with structure info
         if self._current_protein:
             chains = self._current_protein.get_chains()
+            logger.debug(f"MainWindow._on_structure_loaded: chains = {chains}")
             self._selection_panel.set_chains(chains)
 
             num_residues = self._current_protein.get_num_residues()
+            logger.debug(f"MainWindow._on_structure_loaded: num_residues = {num_residues}")
             self._selection_panel.set_selection_count(0, num_residues)
 
             # Load sequence into viewer
             sequence = self._current_protein.get_sequence()
+            logger.debug(f"MainWindow._on_structure_loaded: sequence length = {len(sequence)}")
+            if sequence:
+                logger.debug(f"MainWindow._on_structure_loaded: first 3 sequence entries = {sequence[:3]}")
             self._viewer.set_sequence(sequence)
+            logger.debug("MainWindow._on_structure_loaded: set_sequence() called")
+        else:
+            logger.warning("MainWindow._on_structure_loaded: _current_protein is None, skipping sequence load")
 
     def _on_error(self, message: str):
         """Handle error from viewer.
