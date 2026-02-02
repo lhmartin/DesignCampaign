@@ -233,3 +233,51 @@ class TestProteinMetricMethods:
         assert "rasa" in metrics
         assert "plddt" in metrics
         assert "bfactor" in metrics
+
+
+class TestMetricResultJSONSerialization:
+    """Tests to ensure metric results can be JSON serialized.
+
+    These tests verify that numpy types are properly converted to Python
+    native types for JSON serialization (regression tests for TypeError
+    with numpy.int64 keys).
+    """
+
+    def test_rasa_values_are_json_serializable(self, protein):
+        """Test that RASA values can be serialized to JSON."""
+        import json
+        result = protein.calculate_rasa()
+        # This should not raise TypeError
+        json_str = json.dumps(result.values)
+        assert json_str is not None
+        # Verify round-trip
+        parsed = json.loads(json_str)
+        assert len(parsed) == len(result.values)
+
+    def test_plddt_values_are_json_serializable(self, protein):
+        """Test that pLDDT values can be serialized to JSON."""
+        import json
+        result = protein.get_plddt()
+        # This should not raise TypeError
+        json_str = json.dumps(result.values)
+        assert json_str is not None
+
+    def test_bfactor_values_are_json_serializable(self, protein):
+        """Test that B-factor values can be serialized to JSON."""
+        import json
+        result = protein.get_bfactor()
+        # This should not raise TypeError
+        json_str = json.dumps(result.values)
+        assert json_str is not None
+
+    def test_metric_keys_are_python_ints(self, protein):
+        """Test that metric result keys are Python int, not numpy.int64."""
+        result = protein.calculate_rasa()
+        for key in result.values.keys():
+            assert type(key) is int, f"Key {key} is {type(key)}, expected int"
+
+    def test_metric_values_are_python_floats(self, protein):
+        """Test that metric result values are Python float, not numpy.float64."""
+        result = protein.calculate_rasa()
+        for value in result.values.values():
+            assert type(value) is float, f"Value {value} is {type(value)}, expected float"

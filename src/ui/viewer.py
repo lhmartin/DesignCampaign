@@ -422,6 +422,7 @@ class ProteinViewer(QWidget):
             max_val: Maximum value for color scale.
         """
         # Convert values to colors
+        # Use int() to convert numpy.int64 keys to Python int for JSON serialization
         color_map = {}
         range_val = max_val - min_val if max_val != min_val else 1.0
 
@@ -429,7 +430,7 @@ class ProteinViewer(QWidget):
             norm = (val - min_val) / range_val
             norm = max(0.0, min(1.0, norm))
             color = self._value_to_color(norm)
-            color_map[res_id] = color
+            color_map[int(res_id)] = color  # Ensure Python int for JSON
 
         js_map = json.dumps(color_map)
         self._web_view.page().runJavaScript(f"setMetricColors({js_map});")
