@@ -18,6 +18,9 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QProgressBar,
+    QDoubleSpinBox,
+    QFileDialog,
+    QCheckBox,
 )
 from PyQt6.QtGui import QColor, QPalette
 
@@ -96,6 +99,9 @@ class SelectionPanel(QWidget):
     selection_requested = pyqtSignal(str, object)  # (action, params)
     color_scheme_changed = pyqtSignal(str)  # scheme name
     metric_coloring_requested = pyqtSignal(str)  # metric name
+    interface_requested = pyqtSignal(str, list, float)  # (binder_chain, target_chains, cutoff)
+    select_interface_requested = pyqtSignal()  # select all interface residues
+    export_selection_requested = pyqtSignal(str, str)  # (format, file_path)
 
     def __init__(self, parent=None):
         """Initialize the selection panel.
@@ -106,6 +112,8 @@ class SelectionPanel(QWidget):
         super().__init__(parent)
         self._current_metric: str | None = None
         self._metric_calculating = False
+        self._interface_residue_ids: list[int] = []
+        self._selected_residue_ids: list[int] = []
         self._init_ui()
 
     def _init_ui(self):
@@ -124,6 +132,14 @@ class SelectionPanel(QWidget):
         # Selection group
         selection_group = self._create_selection_group()
         main_layout.addWidget(selection_group)
+
+        # Interface group
+        interface_group = self._create_interface_group()
+        main_layout.addWidget(interface_group)
+
+        # Export group
+        export_group = self._create_export_group()
+        main_layout.addWidget(export_group)
 
         # Color scheme group
         color_group = self._create_color_scheme_group()
@@ -235,6 +251,114 @@ class SelectionPanel(QWidget):
         self._selection_label = QLabel("No residues selected")
         self._selection_label.setStyleSheet("color: #666; font-size: 11px;")
         layout.addWidget(self._selection_label)
+
+        return group
+
+    def _create_interface_group(self) -> QGroupBox:
+        """Create the interface residue controls group."""
+        group = QGroupBox("Interface")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+
+        # Binder chain selection
+        binder_layout = QHBoxLayout()
+        binder_layout.setSpacing(4)
+
+        binder_label = QLabel("Binder:")
+        binder_label.setFixedWidth(50)
+        binder_layout.addWidget(binder_label)
+
+        self._binder_chain_combo = QComboBox()
+        self._binder_chain_combo.setToolTip("Select binder chain")
+        self._binder_chain_combo.addItem("(Select)")
+        binder_layout.addWidget(self._binder_chain_combo)
+
+        layout.addLayout(binder_layout)
+
+        # Target chain selection
+        target_layout = QHBoxLayout()
+        target_layout.setSpacing(4)
+
+        target_label = QLabel("Target:")
+        target_label.setFixedWidth(50)
+        target_layout.addWidget(target_label)
+
+        self._target_chain_combo = QComboBox()
+        self._target_chain_combo.setToolTip("Select target chain(s)")
+        self._target_chain_combo.addItem("(Select)")
+        target_layout.addWidget(self._target_chain_combo)
+
+        layout.addLayout(target_layout)
+
+        # Distance cutoff
+        cutoff_layout = QHBoxLayout()
+        cutoff_layout.setSpacing(4)
+
+        cutoff_label = QLabel("Cutoff:")
+        cutoff_label.setFixedWidth(50)
+        cutoff_layout.addWidget(cutoff_label)
+
+        self._cutoff_spinbox = QDoubleSpinBox()
+        self._cutoff_spinbox.setRange(1.0, 10.0)
+        self._cutoff_spinbox.setValue(4.0)
+        self._cutoff_spinbox.setSingleStep(0.5)
+        self._cutoff_spinbox.setSuffix(" Å")
+        self._cutoff_spinbox.setToolTip("Distance cutoff for interface contacts")
+        cutoff_layout.addWidget(self._cutoff_spinbox)
+
+        layout.addLayout(cutoff_layout)
+
+        # Action buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(4)
+
+        self._btn_find_interface = QPushButton("Find")
+        self._btn_find_interface.setToolTip("Find interface residues")
+        self._btn_find_interface.clicked.connect(self._on_find_interface)
+        btn_layout.addWidget(self._btn_find_interface)
+
+        self._btn_select_interface = QPushButton("Select")
+        self._btn_select_interface.setToolTip("Select interface residues")
+        self._btn_select_interface.clicked.connect(self._on_select_interface)
+        self._btn_select_interface.setEnabled(False)
+        btn_layout.addWidget(self._btn_select_interface)
+
+        self._btn_clear_interface = QPushButton("Clear")
+        self._btn_clear_interface.setToolTip("Clear interface highlight")
+        self._btn_clear_interface.clicked.connect(self._on_clear_interface)
+        self._btn_clear_interface.setEnabled(False)
+        btn_layout.addWidget(self._btn_clear_interface)
+
+        layout.addLayout(btn_layout)
+
+        # Interface info label
+        self._interface_label = QLabel("No interface calculated")
+        self._interface_label.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self._interface_label)
+
+        return group
+
+    def _create_export_group(self) -> QGroupBox:
+        """Create the selection export group."""
+        group = QGroupBox("Export Selection")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+
+        # Export format buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(4)
+
+        self._btn_export_fasta = QPushButton("FASTA")
+        self._btn_export_fasta.setToolTip("Export selected residues as FASTA")
+        self._btn_export_fasta.clicked.connect(lambda: self._on_export_selection("fasta"))
+        btn_layout.addWidget(self._btn_export_fasta)
+
+        self._btn_export_csv = QPushButton("CSV")
+        self._btn_export_csv.setToolTip("Export selected residues as CSV")
+        self._btn_export_csv.clicked.connect(lambda: self._on_export_selection("csv"))
+        btn_layout.addWidget(self._btn_export_csv)
+
+        layout.addLayout(btn_layout)
 
         return group
 
@@ -447,6 +571,21 @@ class SelectionPanel(QWidget):
         for chain in sorted(chains):
             self._chain_combo.addItem(chain)
 
+        # Also update interface chain dropdowns
+        self._binder_chain_combo.clear()
+        self._binder_chain_combo.addItem("(Select)")
+        self._target_chain_combo.clear()
+        self._target_chain_combo.addItem("(Select)")
+
+        for chain in sorted(chains):
+            self._binder_chain_combo.addItem(chain)
+            self._target_chain_combo.addItem(chain)
+
+        # Auto-select if only two chains
+        if len(chains) == 2:
+            self._binder_chain_combo.setCurrentText(chains[1] if len(chains) > 1 else chains[0])
+            self._target_chain_combo.setCurrentText(chains[0])
+
     def set_selection_count(self, count: int, total: int) -> None:
         """Update selection count display.
 
@@ -503,3 +642,106 @@ class SelectionPanel(QWidget):
 
         # Reset to spectrum coloring
         self._color_scheme_buttons["spectrum"].setChecked(True)
+
+        # Clear interface state
+        self._binder_chain_combo.clear()
+        self._binder_chain_combo.addItem("(Select)")
+        self._target_chain_combo.clear()
+        self._target_chain_combo.addItem("(Select)")
+        self._interface_residue_ids = []
+        self._selected_residue_ids = []
+        self._interface_label.setText("No interface calculated")
+        self._btn_select_interface.setEnabled(False)
+        self._btn_clear_interface.setEnabled(False)
+
+    # Interface handler methods
+
+    def _on_find_interface(self) -> None:
+        """Handle find interface button click."""
+        binder = self._binder_chain_combo.currentText()
+        target = self._target_chain_combo.currentText()
+
+        if binder == "(Select)" or target == "(Select)":
+            self._interface_label.setText("Select binder and target chains")
+            self._interface_label.setStyleSheet("color: #c00; font-size: 11px;")
+            return
+
+        if binder == target:
+            self._interface_label.setText("Binder and target must be different")
+            self._interface_label.setStyleSheet("color: #c00; font-size: 11px;")
+            return
+
+        cutoff = self._cutoff_spinbox.value()
+        self.interface_requested.emit(binder, [target], cutoff)
+
+    def _on_select_interface(self) -> None:
+        """Handle select interface button click."""
+        self.select_interface_requested.emit()
+
+    def _on_clear_interface(self) -> None:
+        """Handle clear interface button click."""
+        self._interface_residue_ids = []
+        self._interface_label.setText("No interface calculated")
+        self._interface_label.setStyleSheet("color: #666; font-size: 11px;")
+        self._btn_select_interface.setEnabled(False)
+        self._btn_clear_interface.setEnabled(False)
+        # Signal to clear in viewer will be handled by main window
+
+    def set_interface_result(self, residue_ids: list[int]) -> None:
+        """Update interface display after calculation.
+
+        Args:
+            residue_ids: List of interface residue IDs.
+        """
+        self._interface_residue_ids = residue_ids.copy()
+
+        if residue_ids:
+            self._interface_label.setText(f"{len(residue_ids)} interface residues")
+            self._interface_label.setStyleSheet("color: #333; font-size: 11px;")
+            self._btn_select_interface.setEnabled(True)
+            self._btn_clear_interface.setEnabled(True)
+        else:
+            self._interface_label.setText("No interface residues found")
+            self._interface_label.setStyleSheet("color: #666; font-size: 11px;")
+            self._btn_select_interface.setEnabled(False)
+            self._btn_clear_interface.setEnabled(False)
+
+    def get_interface_residues(self) -> list[int]:
+        """Get the current interface residue IDs."""
+        return self._interface_residue_ids.copy()
+
+    # Export handler methods
+
+    def _on_export_selection(self, format_type: str) -> None:
+        """Handle export selection button click.
+
+        Args:
+            format_type: Export format ('fasta' or 'csv').
+        """
+        if format_type == "fasta":
+            file_filter = "FASTA Files (*.fasta *.fa);;All Files (*)"
+            default_ext = ".fasta"
+        else:
+            file_filter = "CSV Files (*.csv);;All Files (*)"
+            default_ext = ".csv"
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Export Selection as {format_type.upper()}",
+            "",
+            file_filter,
+        )
+
+        if file_path:
+            # Ensure extension
+            if not file_path.endswith(default_ext):
+                file_path += default_ext
+            self.export_selection_requested.emit(format_type, file_path)
+
+    def set_selected_residues(self, residue_ids: list[int]) -> None:
+        """Store the currently selected residue IDs for export.
+
+        Args:
+            residue_ids: List of selected residue IDs.
+        """
+        self._selected_residue_ids = residue_ids.copy()

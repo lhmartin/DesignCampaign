@@ -10,6 +10,7 @@ from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtWidgets import QVBoxLayout, QWidget, QLabel, QMessageBox
 
 from src.config.settings import DEFAULT_BACKGROUND_COLOR
+from src.ui.sequence_viewer import SequenceViewer
 from src.config.color_schemes import (
     ColorScheme,
     SpectrumScheme,
@@ -292,6 +293,29 @@ VIEWER_HTML = """
             viewer.render();
         }
 
+        // Interface residue highlighting
+        let interfaceResidues = new Set();
+
+        function highlightInterfaceResidues(residueIds) {
+            interfaceResidues = new Set(residueIds);
+            applyCurrentStyle();
+
+            // Add orange highlight to interface residues
+            if (interfaceResidues.size > 0) {
+                let intArray = Array.from(interfaceResidues);
+                viewer.addStyle({resi: intArray}, {
+                    cartoon: {color: '#ff8c00'},
+                    stick: {color: '#ff8c00', radius: 0.15}
+                });
+                viewer.render();
+            }
+        }
+
+        function clearInterfaceHighlight() {
+            interfaceResidues.clear();
+            applyCurrentStyle();
+        }
+
         // Initialize on load
         document.addEventListener('DOMContentLoaded', initViewer);
     </script>
@@ -324,6 +348,7 @@ class ProteinViewer(QWidget):
         self._current_scheme: ColorScheme = SpectrumScheme()
         self._current_style: str = "cartoon"
         self._selected_residues: list[int] = []
+        self._interface_residues: list[int] = []
         self._init_ui()
 
     def _init_ui(self):
@@ -338,6 +363,11 @@ class ProteinViewer(QWidget):
             "QLabel { background-color: #f0f0f0; padding: 8px; font-weight: bold; }"
         )
         layout.addWidget(self._header)
+
+        # Sequence viewer (above 3D view)
+        self._sequence_viewer = SequenceViewer()
+        self._sequence_viewer.selection_changed.connect(self._on_sequence_selection_changed)
+        layout.addWidget(self._sequence_viewer)
 
         # WebEngine view for 3Dmol
         self._web_view = QWebEngineView()
@@ -387,6 +417,8 @@ class ProteinViewer(QWidget):
         self._header.setText("No structure loaded")
         self._current_file = None
         self._selected_residues = []
+        self._interface_residues = []
+        self._sequence_viewer.clear()
 
     def set_style(self, style: str) -> None:
         """Set the visualization style.
@@ -554,3 +586,70 @@ class ProteinViewer(QWidget):
     def get_available_styles() -> list[str]:
         """Get list of available visualization styles."""
         return ["cartoon", "stick", "sphere", "line", "surface"]
+
+    # Sequence viewer methods
+
+    def set_sequence(self, sequence: list[dict]) -> None:
+        """Set the sequence to display in the sequence viewer.
+
+        Args:
+            sequence: List of residue dicts with 'id', 'one_letter', 'name', 'chain'.
+        """
+        self._sequence_viewer.set_sequence(sequence)
+
+    def set_interface_residues(self, residue_ids: list[int]) -> None:
+        """Highlight interface residues in the viewer.
+
+        Args:
+            residue_ids: List of interface residue IDs.
+        """
+        self._interface_residues = residue_ids.copy()
+        self._sequence_viewer.set_interface_residues(residue_ids)
+
+        # Also highlight in 3D viewer (orange color)
+        if residue_ids:
+            ids_json = json.dumps(residue_ids)
+            self._web_view.page().runJavaScript(
+                f"highlightInterfaceResidues({ids_json});"
+            )
+
+    def clear_interface(self) -> None:
+        """Clear interface residue highlighting."""
+        self._interface_residues = []
+        self._sequence_viewer.clear_interface()
+        self._web_view.page().runJavaScript("clearInterfaceHighlight();")
+
+    def _on_sequence_selection_changed(self, residue_ids: list[int]) -> None:
+        """Handle selection change from sequence viewer.
+
+        Args:
+            residue_ids: List of selected residue IDs.
+        """
+        # Update 3D viewer selection
+        self.select_residues(residue_ids, add_to_selection=False)
+
+    def sync_selection_to_sequence(self) -> None:
+        """Sync the current 3D selection to the sequence viewer."""
+        self._sequence_viewer.set_selection(self._selected_residues)
+
+    def set_sequence_coloring(self, color_map: dict[int, str]) -> None:
+        """Apply coloring to the sequence viewer.
+
+        Args:
+            color_map: Dict mapping residue IDs to hex color strings.
+        """
+        self._sequence_viewer.set_coloring(color_map)
+
+    def clear_sequence_coloring(self) -> None:
+        """Clear coloring from the sequence viewer."""
+        self._sequence_viewer.clear_coloring()
+
+    @property
+    def sequence_viewer(self) -> SequenceViewer:
+        """Get the sequence viewer widget."""
+        return self._sequence_viewer
+
+    @property
+    def interface_residues(self) -> list[int]:
+        """Get the current interface residue IDs."""
+        return self._interface_residues.copy()

@@ -20,6 +20,12 @@ from src.models.metrics import (
     calculate_secondary_structure,
     get_available_metrics,
 )
+from src.models.interface import (
+    THREE_TO_ONE,
+    get_interface_residues as calc_interface_residues,
+    get_bidirectional_interface,
+    count_interface_contacts,
+)
 
 
 class Protein:
@@ -192,6 +198,82 @@ class Protein:
             List of metric names.
         """
         return get_available_metrics()
+
+    def get_sequence(self) -> list[dict[str, Any]]:
+        """Get the protein sequence with residue information.
+
+        Returns:
+            List of dicts with keys:
+            - 'id': Residue ID (int)
+            - 'name': Three-letter code (str)
+            - 'one_letter': Single-letter code (str)
+            - 'chain': Chain ID (str)
+        """
+        residues = self.get_residue_info()
+        sequence = []
+
+        for res in residues:
+            one_letter = THREE_TO_ONE.get(res["name"], "X")
+            sequence.append({
+                "id": res["id"],
+                "name": res["name"],
+                "one_letter": one_letter,
+                "chain": res["chain"],
+            })
+
+        return sequence
+
+    def get_interface_residues(
+        self,
+        binder_chain: str = "B",
+        target_chains: list[str] | None = None,
+        distance_cutoff: float = 4.0,
+    ) -> dict[int, str]:
+        """Get interface residues between binder and target chains.
+
+        Args:
+            binder_chain: Chain identifier for the binder protein.
+            target_chains: Chain identifiers for the target proteins.
+            distance_cutoff: Maximum distance (Å) for interface contacts.
+
+        Returns:
+            Dictionary mapping residue IDs to single-letter amino acid codes.
+        """
+        if target_chains is None:
+            target_chains = ["A"]
+
+        return calc_interface_residues(
+            self.structure,
+            binder_chain=binder_chain,
+            target_chains=target_chains,
+            distance_cutoff=distance_cutoff,
+        )
+
+    def get_interface_contacts(
+        self,
+        binder_chain: str = "B",
+        target_chains: list[str] | None = None,
+        distance_cutoff: float = 4.0,
+    ) -> dict[int, int]:
+        """Get contact counts for interface residues.
+
+        Args:
+            binder_chain: Chain identifier for the binder protein.
+            target_chains: Chain identifiers for the target proteins.
+            distance_cutoff: Maximum distance (Å) for interface contacts.
+
+        Returns:
+            Dictionary mapping residue IDs to contact counts.
+        """
+        if target_chains is None:
+            target_chains = ["A"]
+
+        return count_interface_contacts(
+            self.structure,
+            binder_chain=binder_chain,
+            target_chains=target_chains,
+            distance_cutoff=distance_cutoff,
+        )
 
     def __repr__(self) -> str:
         """Return string representation of the Protein."""
