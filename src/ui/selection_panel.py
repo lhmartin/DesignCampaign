@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QCheckBox,
+    QColorDialog,
 )
 from PyQt6.QtGui import QColor, QPalette
 
@@ -101,7 +102,9 @@ class SelectionPanel(QWidget):
     metric_coloring_requested = pyqtSignal(str)  # metric name
     interface_requested = pyqtSignal(str, list, float)  # (binder_chain, target_chains, cutoff)
     select_interface_requested = pyqtSignal()  # select all interface residues
+    clear_interface_requested = pyqtSignal()  # clear interface highlighting
     export_selection_requested = pyqtSignal(str, str)  # (format, file_path)
+    selection_color_requested = pyqtSignal(str)  # hex color for selection
 
     def __init__(self, parent=None):
         """Initialize the selection panel.
@@ -114,6 +117,7 @@ class SelectionPanel(QWidget):
         self._metric_calculating = False
         self._interface_residue_ids: list[int] = []
         self._selected_residue_ids: list[int] = []
+        self._selected_color: str = "#ff0000"  # Default red for selection coloring
         self._init_ui()
 
     def _init_ui(self):
@@ -246,6 +250,28 @@ class SelectionPanel(QWidget):
         view_layout.addWidget(self._btn_center)
 
         layout.addLayout(view_layout)
+
+        # Selection coloring
+        color_layout = QHBoxLayout()
+        color_layout.setSpacing(4)
+
+        color_label = QLabel("Color:")
+        color_label.setFixedWidth(45)
+        color_layout.addWidget(color_label)
+
+        self._color_btn = QPushButton()
+        self._color_btn.setFixedSize(30, 25)
+        self._color_btn.setStyleSheet(f"background-color: {self._selected_color};")
+        self._color_btn.setToolTip("Click to choose selection color")
+        self._color_btn.clicked.connect(self._on_choose_color)
+        color_layout.addWidget(self._color_btn)
+
+        self._btn_apply_color = QPushButton("Apply")
+        self._btn_apply_color.setToolTip("Apply color to selected residues")
+        self._btn_apply_color.clicked.connect(self._on_apply_color)
+        color_layout.addWidget(self._btn_apply_color)
+
+        layout.addLayout(color_layout)
 
         # Selection info
         self._selection_label = QLabel("No residues selected")
@@ -685,7 +711,8 @@ class SelectionPanel(QWidget):
         self._interface_label.setStyleSheet("color: #666; font-size: 11px;")
         self._btn_select_interface.setEnabled(False)
         self._btn_clear_interface.setEnabled(False)
-        # Signal to clear in viewer will be handled by main window
+        # Emit signal to clear interface highlighting in viewer
+        self.clear_interface_requested.emit()
 
     def set_interface_result(self, residue_ids: list[int]) -> None:
         """Update interface display after calculation.
@@ -709,6 +736,19 @@ class SelectionPanel(QWidget):
     def get_interface_residues(self) -> list[int]:
         """Get the current interface residue IDs."""
         return self._interface_residue_ids.copy()
+
+    # Selection color handler methods
+
+    def _on_choose_color(self) -> None:
+        """Handle color button click to open color picker."""
+        color = QColorDialog.getColor(QColor(self._selected_color), self, "Select Color")
+        if color.isValid():
+            self._selected_color = color.name()
+            self._color_btn.setStyleSheet(f"background-color: {self._selected_color};")
+
+    def _on_apply_color(self) -> None:
+        """Handle apply color button click."""
+        self.selection_color_requested.emit(self._selected_color)
 
     # Export handler methods
 

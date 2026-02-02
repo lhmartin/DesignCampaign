@@ -346,9 +346,9 @@ class MainWindow(QMainWindow):
             file_path: Path to the protein structure file.
         """
         self._statusbar.showMessage(f"Loading: {file_path}")
-        self._viewer.load_structure(file_path)
 
-        # Load protein model for metrics
+        # Load protein model FIRST (before viewer emits structure_loaded signal)
+        # This fixes race condition where signal fires before _current_protein is set
         try:
             self._current_protein = Protein(file_path)
             # Pre-load structure for faster metric calculation
@@ -356,6 +356,9 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._statusbar.showMessage(f"Warning: Could not load structure model: {e}")
             self._current_protein = None
+
+        # Now load in viewer (structure_loaded signal will have valid _current_protein)
+        self._viewer.load_structure(file_path)
 
     def _on_folder_changed(self, folder_path: str):
         """Handle folder change.
