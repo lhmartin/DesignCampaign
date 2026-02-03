@@ -287,8 +287,12 @@ class SequenceViewer(QWidget):
         # Update label
         num_residues = len(self._residue_cells)
         chains = set(r.get("chain", "") for r in sequence)
-        chain_str = ", ".join(sorted(chains)) if chains else ""
+        chain_str = ", ".join(sorted(str(c) for c in chains)) if chains else ""
         self._label.setText(f"Sequence: {num_residues} residues ({chain_str})")
+
+        # CRITICAL: Resize container to fit all cells so they're visible in scroll area
+        self._sequence_container.adjustSize()
+        logger.debug(f"SequenceViewer.set_sequence: container size after adjustSize = {self._sequence_container.size()}")
 
     def clear(self) -> None:
         """Clear the sequence display."""

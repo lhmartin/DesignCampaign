@@ -80,7 +80,8 @@ class Protein:
                     model=1
                 )
             elif file_format == ".cif":
-                cif_file = pdbx.PDBxFile.read(str(self.file_path))
+                # biotite 1.0+ uses CIFFile instead of PDBxFile
+                cif_file = pdbx.CIFFile.read(str(self.file_path))
                 self._structure = pdbx.get_structure(
                     cif_file,
                     extra_fields=["b_factor"],
