@@ -1,5 +1,6 @@
 """Protein data model for structure handling."""
 
+import logging
 from pathlib import Path
 from typing import Any, Optional
 
@@ -26,6 +27,8 @@ from src.models.interface import (
     get_bidirectional_interface,
     count_interface_contacts,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Protein:
@@ -77,7 +80,8 @@ class Protein:
                     model=1
                 )
             elif file_format == ".cif":
-                cif_file = pdbx.PDBxFile.read(str(self.file_path))
+                # biotite 1.0+ uses CIFFile instead of PDBxFile
+                cif_file = pdbx.CIFFile.read(str(self.file_path))
                 self._structure = pdbx.get_structure(
                     cif_file,
                     extra_fields=["b_factor"],
@@ -210,6 +214,7 @@ class Protein:
             - 'chain': Chain ID (str)
         """
         residues = self.get_residue_info()
+        logger.debug(f"Protein.get_sequence: got {len(residues)} residues from get_residue_info()")
         sequence = []
 
         for res in residues:
@@ -221,6 +226,9 @@ class Protein:
                 "chain": res["chain"],
             })
 
+        logger.debug(f"Protein.get_sequence: returning {len(sequence)} sequence entries")
+        if sequence:
+            logger.debug(f"Protein.get_sequence: first 5 entries: {sequence[:5]}")
         return sequence
 
     def get_interface_residues(

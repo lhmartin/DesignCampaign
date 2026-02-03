@@ -4,6 +4,7 @@ This module provides a horizontal sequence viewer that displays amino acid
 sequences with selection support and synchronizes with the 3D viewer.
 """
 
+import logging
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
@@ -18,6 +19,8 @@ from PyQt6.QtWidgets import (
     QFrame,
     QSizePolicy,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ResidueCell(QWidget):
@@ -243,13 +246,17 @@ class SequenceViewer(QWidget):
         Args:
             sequence: List of residue dicts with 'id', 'one_letter', 'name', 'chain'.
         """
+        logger.debug(f"SequenceViewer.set_sequence: received {len(sequence) if sequence else 0} residues")
+
         # Clear existing cells
         self.clear()
 
         if not sequence:
+            logger.warning("SequenceViewer.set_sequence: sequence is empty or None")
             self._label.setText("No sequence loaded")
             return
 
+        logger.debug(f"SequenceViewer.set_sequence: first 3 residues = {sequence[:3]}")
         current_chain = None
 
         for res in sequence:
@@ -274,13 +281,37 @@ class SequenceViewer(QWidget):
             self._residue_cells[res["id"]] = cell
             self._sequence_layout.addWidget(cell)
 
-        self._sequence_layout.addStretch()
+        # Don't add stretch - it interferes with size calculation
+        logger.debug(f"SequenceViewer.set_sequence: created {len(self._residue_cells)} residue cells")
 
         # Update label
         num_residues = len(self._residue_cells)
         chains = set(r.get("chain", "") for r in sequence)
-        chain_str = ", ".join(sorted(chains)) if chains else ""
+        chain_str = ", ".join(sorted(str(c) for c in chains)) if chains else ""
         self._label.setText(f"Sequence: {num_residues} residues ({chain_str})")
+
+        # CRITICAL: Explicitly set container size since adjustSize() doesn't work with scroll area
+        # Calculate width directly using known fixed cell sizes (sizeHint() returns 0 before layout)
+        spacing = self._sequence_layout.spacing()
+        margins = self._sequence_layout.contentsMargins()
+
+        # Count cells and separators
+        num_cells = len(self._residue_cells)
+        num_separators = len(chains) - 1 if len(chains) > 1 else 0
+
+        # Calculate total width: margins + cells + separators + spacing between all widgets
+        total_widgets = num_cells + num_separators
+        total_width = (
+            margins.left() + margins.right() +
+            num_cells * ResidueCell.CELL_WIDTH +
+            num_separators * 24 +  # ChainSeparator width is 24
+            (total_widgets - 1) * spacing if total_widgets > 0 else 0
+        )
+
+        # Set fixed size for container - height is cell height
+        container_height = ResidueCell.CELL_HEIGHT
+        self._sequence_container.setFixedSize(total_width, container_height)
+        logger.debug(f"SequenceViewer.set_sequence: container size set to {total_width}x{container_height} ({num_cells} cells, {num_separators} separators)")
 
     def clear(self) -> None:
         """Clear the sequence display."""

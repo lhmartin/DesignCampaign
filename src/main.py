@@ -1,5 +1,6 @@
 """Application entry point for DesignCampaign."""
 
+import logging
 import os
 import sys
 
@@ -16,8 +17,37 @@ from PyQt6.QtWidgets import QApplication
 from src.ui.main_window import MainWindow
 
 
+def configure_logging(debug: bool = False) -> None:
+    """Configure logging for the application.
+
+    Args:
+        debug: If True, enable DEBUG level logging for troubleshooting.
+    """
+    level = logging.DEBUG if debug else logging.WARNING
+    format_str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+    logging.basicConfig(
+        level=level,
+        format=format_str,
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
+    if debug:
+        logging.info("Debug logging enabled")
+
+
 def main():
     """Run the DesignCampaign application."""
+    # Check for debug flag
+    debug_mode = "--debug" in sys.argv
+    if debug_mode:
+        sys.argv.remove("--debug")
+
+    # Configure logging
+    configure_logging(debug=debug_mode)
+
     # Additional fallback for software rendering if needed
     if "--software-rendering" in sys.argv:
         os.environ["QT_QUICK_BACKEND"] = "software"

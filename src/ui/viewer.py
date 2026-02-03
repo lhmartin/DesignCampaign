@@ -1,6 +1,7 @@
 """3D protein structure viewer widget using py3Dmol."""
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,8 @@ from src.config.color_schemes import (
     get_available_schemes,
 )
 from src.utils.file_utils import read_protein_file, get_file_format
+
+logger = logging.getLogger(__name__)
 
 
 # HTML template for the 3Dmol.js viewer with selection and coloring support
@@ -595,7 +598,11 @@ class ProteinViewer(QWidget):
         Args:
             sequence: List of residue dicts with 'id', 'one_letter', 'name', 'chain'.
         """
+        logger.debug(f"ProteinViewer.set_sequence: received {len(sequence)} residues")
+        if sequence:
+            logger.debug(f"ProteinViewer.set_sequence: first 3 = {sequence[:3]}")
         self._sequence_viewer.set_sequence(sequence)
+        logger.debug("ProteinViewer.set_sequence: called _sequence_viewer.set_sequence()")
 
     def set_interface_residues(self, residue_ids: list[int]) -> None:
         """Highlight interface residues in the viewer.
