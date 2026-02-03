@@ -737,6 +737,11 @@ class SelectionPanel(QWidget):
         """Get the current interface residue IDs."""
         return self._interface_residue_ids.copy()
 
+    def get_binder_chain(self) -> str:
+        """Get the currently selected binder chain."""
+        chain = self._binder_chain_combo.currentText()
+        return chain if chain != "(Select)" else ""
+
     # Selection color handler methods
 
     def _on_choose_color(self) -> None:

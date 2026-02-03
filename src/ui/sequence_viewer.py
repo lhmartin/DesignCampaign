@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class ResidueCell(QWidget):
     """A single residue cell in the sequence viewer."""
 
-    clicked = pyqtSignal(int, bool)  # (residue_id, ctrl_held)
+    clicked = pyqtSignal(str, int, bool)  # (chain, residue_id, ctrl_held)
 
     # Cell styling constants
     CELL_WIDTH = 22
@@ -128,11 +128,15 @@ class ResidueCell(QWidget):
             self._one_letter
         )
 
+    @property
+    def chain(self) -> str:
+        return self._chain
+
     def mousePressEvent(self, event):
         """Handle mouse click."""
         if event.button() == Qt.MouseButton.LeftButton:
             ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
-            self.clicked.emit(self._residue_id, bool(ctrl))
+            self.clicked.emit(self._chain, self._residue_id, bool(ctrl))
 
 
 class ChainSeparator(QFrame):
@@ -174,18 +178,19 @@ class SequenceViewer(QWidget):
     Supports click selection, multi-select, and syncs with 3D viewer.
 
     Signals:
-        residue_clicked(int, bool): Emitted when a residue is clicked (id, ctrl_held).
-        selection_changed(list[int]): Emitted when the selection changes.
+        residue_clicked(str, int, bool): Emitted when a residue is clicked (chain, id, ctrl_held).
+        selection_changed(list[dict]): Emitted when the selection changes (list of {chain, id}).
     """
 
-    residue_clicked = pyqtSignal(int, bool)
+    residue_clicked = pyqtSignal(str, int, bool)
     selection_changed = pyqtSignal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._residue_cells: dict[int, ResidueCell] = {}
-        self._selected_ids: set[int] = set()
-        self._interface_ids: set[int] = set()
+        # Key is (chain, residue_id) tuple to handle multi-chain structures
+        self._residue_cells: dict[tuple[str, int], ResidueCell] = {}
+        self._selected_keys: set[tuple[str, int]] = set()  # set of (chain, id) tuples
+        self._interface_keys: set[tuple[str, int]] = set()  # set of (chain, id) tuples
         self._init_ui()
 
     def _init_ui(self):
@@ -278,7 +283,8 @@ class SequenceViewer(QWidget):
             )
             cell.clicked.connect(self._on_cell_clicked)
 
-            self._residue_cells[res["id"]] = cell
+            # Use (chain, residue_id) tuple as key to handle multi-chain structures
+            self._residue_cells[(chain, res["id"])] = cell
             self._sequence_layout.addWidget(cell)
 
         # Don't add stretch - it interferes with size calculation
@@ -322,52 +328,52 @@ class SequenceViewer(QWidget):
                 item.widget().deleteLater()
 
         self._residue_cells.clear()
-        self._selected_ids.clear()
-        self._interface_ids.clear()
+        self._selected_keys.clear()
+        self._interface_keys.clear()
         self._label.setText("No sequence loaded")
         self._btn_scroll_to_selection.setEnabled(False)
 
-    def set_selection(self, residue_ids: list[int]) -> None:
+    def set_selection(self, selection: list[dict[str, Any]]) -> None:
         """Update the selection (called from 3D viewer sync).
 
         Args:
-            residue_ids: List of selected residue IDs.
+            selection: List of dicts with 'chain' and 'id' keys.
         """
         # Update internal state
-        self._selected_ids = set(residue_ids)
+        self._selected_keys = {(item["chain"], item["id"]) for item in selection}
 
         # Update cell states
-        for res_id, cell in self._residue_cells.items():
-            cell.set_selected(res_id in self._selected_ids)
+        for key, cell in self._residue_cells.items():
+            cell.set_selected(key in self._selected_keys)
 
         # Enable/disable scroll button
-        self._btn_scroll_to_selection.setEnabled(len(self._selected_ids) > 0)
+        self._btn_scroll_to_selection.setEnabled(len(self._selected_keys) > 0)
 
-    def set_interface_residues(self, residue_ids: list[int]) -> None:
+    def set_interface_residues(self, interface: list[dict[str, Any]]) -> None:
         """Mark residues as interface residues.
 
         Args:
-            residue_ids: List of interface residue IDs.
+            interface: List of dicts with 'chain' and 'id' keys.
         """
-        self._interface_ids = set(residue_ids)
+        self._interface_keys = {(item["chain"], item["id"]) for item in interface}
 
-        for res_id, cell in self._residue_cells.items():
-            cell.set_interface(res_id in self._interface_ids)
+        for key, cell in self._residue_cells.items():
+            cell.set_interface(key in self._interface_keys)
 
     def clear_interface(self) -> None:
         """Clear interface markers."""
-        self._interface_ids.clear()
+        self._interface_keys.clear()
         for cell in self._residue_cells.values():
             cell.set_interface(False)
 
-    def set_coloring(self, color_map: dict[int, str]) -> None:
+    def set_coloring(self, color_map: dict[tuple[str, int], str]) -> None:
         """Apply coloring to residues.
 
         Args:
-            color_map: Dict mapping residue IDs to hex color strings.
+            color_map: Dict mapping (chain, residue_id) tuples to hex color strings.
         """
-        for res_id, cell in self._residue_cells.items():
-            color = color_map.get(res_id)
+        for key, cell in self._residue_cells.items():
+            color = color_map.get(key)
             cell.set_color(color)
 
     def clear_coloring(self) -> None:
@@ -375,42 +381,46 @@ class SequenceViewer(QWidget):
         for cell in self._residue_cells.values():
             cell.set_color(None)
 
-    def _on_cell_clicked(self, residue_id: int, ctrl_held: bool) -> None:
+    def _on_cell_clicked(self, chain: str, residue_id: int, ctrl_held: bool) -> None:
         """Handle cell click."""
+        key = (chain, residue_id)
+
         # Update selection based on ctrl key
         if ctrl_held:
-            if residue_id in self._selected_ids:
-                self._selected_ids.discard(residue_id)
+            if key in self._selected_keys:
+                self._selected_keys.discard(key)
             else:
-                self._selected_ids.add(residue_id)
+                self._selected_keys.add(key)
         else:
-            self._selected_ids = {residue_id}
+            self._selected_keys = {key}
 
         # Update visual state
-        for res_id, cell in self._residue_cells.items():
-            cell.set_selected(res_id in self._selected_ids)
+        for cell_key, cell in self._residue_cells.items():
+            cell.set_selected(cell_key in self._selected_keys)
 
         # Enable/disable scroll button
-        self._btn_scroll_to_selection.setEnabled(len(self._selected_ids) > 0)
+        self._btn_scroll_to_selection.setEnabled(len(self._selected_keys) > 0)
 
-        # Emit signals
-        self.residue_clicked.emit(residue_id, ctrl_held)
-        self.selection_changed.emit(list(self._selected_ids))
+        # Emit signals - convert to list of dicts for external use
+        self.residue_clicked.emit(chain, residue_id, ctrl_held)
+        selection_list = [{"chain": c, "id": r} for c, r in self._selected_keys]
+        self.selection_changed.emit(selection_list)
 
     def _scroll_to_selection(self) -> None:
         """Scroll to show the first selected residue."""
-        if not self._selected_ids:
+        if not self._selected_keys:
             return
 
-        first_selected = min(self._selected_ids)
-        cell = self._residue_cells.get(first_selected)
+        # Get the first selected key (sorted by chain, then residue id)
+        first_key = min(self._selected_keys)
+        cell = self._residue_cells.get(first_key)
         if cell:
             self._scroll_area.ensureWidgetVisible(cell, 50, 0)
 
-    def get_selected_ids(self) -> list[int]:
-        """Get the currently selected residue IDs."""
-        return list(self._selected_ids)
+    def get_selected(self) -> list[dict[str, Any]]:
+        """Get the currently selected residues as list of dicts."""
+        return [{"chain": c, "id": r} for c, r in self._selected_keys]
 
-    def get_interface_ids(self) -> list[int]:
-        """Get the interface residue IDs."""
-        return list(self._interface_ids)
+    def get_interface(self) -> list[dict[str, Any]]:
+        """Get the interface residues as list of dicts."""
+        return [{"chain": c, "id": r} for c, r in self._interface_keys]
