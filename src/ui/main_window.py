@@ -417,15 +417,17 @@ class MainWindow(QMainWindow):
         """
         self._statusbar.showMessage(f"Error: {message}")
 
-    def _on_selection_changed(self, residue_ids: list[int]):
+    def _on_selection_changed(self, selection: list[dict]):
         """Handle selection change in viewer.
 
         Args:
-            residue_ids: List of selected residue IDs.
+            selection: List of dicts with 'chain' and 'id' keys.
         """
         if self._current_protein:
             total = self._current_protein.get_num_residues()
-            self._selection_panel.set_selection_count(len(residue_ids), total)
+            self._selection_panel.set_selection_count(len(selection), total)
+            # Pass just the residue IDs to selection panel for now
+            residue_ids = [r["id"] for r in selection]
             self._selection_panel.set_selected_residues(residue_ids)
 
         # Sync to sequence viewer
@@ -789,9 +791,13 @@ class MainWindow(QMainWindow):
                 distance_cutoff=cutoff,
             )
 
+            # Interface is dict mapping residue ID to amino acid
+            # Convert to list of dicts with chain info (interface residues are on binder chain)
             residue_ids = list(interface.keys())
+            interface_list = [{"chain": binder_chain, "id": res_id} for res_id in residue_ids]
+
             self._selection_panel.set_interface_result(residue_ids)
-            self._viewer.set_interface_residues(residue_ids)
+            self._viewer.set_interface_residues(interface_list)
 
             if residue_ids:
                 self._statusbar.showMessage(f"Found {len(residue_ids)} interface residues")
@@ -806,7 +812,11 @@ class MainWindow(QMainWindow):
         """Handle select interface residues request."""
         interface_ids = self._selection_panel.get_interface_residues()
         if interface_ids:
-            self._viewer.select_residues(interface_ids)
+            # Get the binder chain from the selection panel
+            binder_chain = self._selection_panel.get_binder_chain()
+            # Convert to list of dicts with chain info
+            interface_list = [{"chain": binder_chain, "id": res_id} for res_id in interface_ids]
+            self._viewer.select_residues(interface_list)
             self._statusbar.showMessage(f"Selected {len(interface_ids)} interface residues")
 
     def _on_clear_interface_requested(self):
@@ -844,9 +854,9 @@ class MainWindow(QMainWindow):
         try:
             sequence = self._current_protein.get_sequence()
 
-            # Filter to selected residues
-            selected_set = set(selected)
-            selected_residues = [r for r in sequence if r["id"] in selected_set]
+            # Build set of (chain, id) tuples for selected residues
+            selected_set = {(r["chain"], r["id"]) for r in selected}
+            selected_residues = [r for r in sequence if (r["chain"], r["id"]) in selected_set]
 
             if format_type == "fasta":
                 self._export_fasta(file_path, selected_residues)

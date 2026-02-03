@@ -44,10 +44,21 @@ VIEWER_HTML = """
     <div id="viewer"></div>
     <script>
         let viewer = null;
-        let selectedResidues = new Set();
+        // Store selected residues as array of {chain, resi} objects
+        let selectedResidues = [];
         let currentStyle = 'cartoon';
         let currentColorScheme = 'spectrum';
         let metricColorMap = {};
+
+        // Helper to check if a residue is selected
+        function isSelected(chain, resi) {
+            return selectedResidues.some(r => r.chain === chain && r.resi === resi);
+        }
+
+        // Helper to find index of selected residue
+        function findSelectedIndex(chain, resi) {
+            return selectedResidues.findIndex(r => r.chain === chain && r.resi === resi);
+        }
 
         function initViewer() {
             let element = document.getElementById('viewer');
@@ -68,7 +79,7 @@ VIEWER_HTML = """
         function loadStructure(pdbData, format) {
             if (!viewer) initViewer();
             viewer.clear();
-            selectedResidues.clear();
+            selectedResidues = [];
             metricColorMap = {};
             viewer.addModel(pdbData, format);
             applyCurrentStyle();
@@ -79,7 +90,7 @@ VIEWER_HTML = """
         function clearViewer() {
             if (viewer) {
                 viewer.clear();
-                selectedResidues.clear();
+                selectedResidues = [];
                 metricColorMap = {};
                 viewer.render();
             }
@@ -168,16 +179,20 @@ VIEWER_HTML = """
         }
 
         function handleAtomClick(atom, multiSelect) {
-            let resId = atom.resi;
+            let chain = atom.chain;
+            let resi = atom.resi;
 
             if (!multiSelect) {
-                selectedResidues.clear();
+                selectedResidues = [];
             }
 
-            if (selectedResidues.has(resId)) {
-                selectedResidues.delete(resId);
+            let idx = findSelectedIndex(chain, resi);
+            if (idx >= 0) {
+                // Remove from selection
+                selectedResidues.splice(idx, 1);
             } else {
-                selectedResidues.add(resId);
+                // Add to selection
+                selectedResidues.push({chain: chain, resi: resi});
             }
 
             highlightSelection();
@@ -185,28 +200,32 @@ VIEWER_HTML = """
 
             // Notify Python of selection change
             if (window.pyBridge) {
-                window.pyBridge.onSelectionChanged(JSON.stringify(Array.from(selectedResidues)));
+                window.pyBridge.onSelectionChanged(JSON.stringify(selectedResidues));
             }
         }
 
         function highlightSelection() {
-            if (!viewer || selectedResidues.size === 0) return;
+            if (!viewer || selectedResidues.length === 0) return;
 
-            // Add highlight style to selected residues
-            let selArray = Array.from(selectedResidues);
-            viewer.setStyle({resi: selArray}, {
-                cartoon: {color: '#ffff00'},
-                stick: {color: '#ffff00', radius: 0.2}
-            }, true);  // Add to existing style
+            // Add highlight style to selected residues - must filter by both chain and resi
+            selectedResidues.forEach(function(sel) {
+                viewer.setStyle({chain: sel.chain, resi: sel.resi}, {
+                    cartoon: {color: '#ffff00'},
+                    stick: {color: '#ffff00', radius: 0.2}
+                }, true);  // Add to existing style
+            });
         }
 
-        function selectResidues(residueIds, addToSelection) {
+        // residues is array of {chain, resi} objects
+        function selectResidues(residues, addToSelection) {
             if (!addToSelection) {
-                selectedResidues.clear();
+                selectedResidues = [];
             }
 
-            residueIds.forEach(function(id) {
-                selectedResidues.add(id);
+            residues.forEach(function(sel) {
+                if (!isSelected(sel.chain, sel.resi)) {
+                    selectedResidues.push({chain: sel.chain, resi: sel.resi});
+                }
             });
 
             applyCurrentStyle();
@@ -217,36 +236,59 @@ VIEWER_HTML = """
 
             let atoms = viewer.getModel().selectedAtoms({});
             let toSelect = [];
+            let seen = new Set();
 
             atoms.forEach(function(atom) {
                 if (atom.resi >= start && atom.resi <= end) {
                     if (!chain || atom.chain === chain) {
-                        toSelect.push(atom.resi);
+                        let key = atom.chain + ':' + atom.resi;
+                        if (!seen.has(key)) {
+                            seen.add(key);
+                            toSelect.push({chain: atom.chain, resi: atom.resi});
+                        }
                     }
                 }
             });
 
-            selectResidues([...new Set(toSelect)], false);
+            selectResidues(toSelect, false);
         }
 
         function selectByChain(chainId) {
             if (!viewer) return;
 
             let atoms = viewer.getModel().selectedAtoms({chain: chainId});
-            let residues = [...new Set(atoms.map(a => a.resi))];
-            selectResidues(residues, false);
+            let toSelect = [];
+            let seen = new Set();
+
+            atoms.forEach(function(atom) {
+                let key = atom.chain + ':' + atom.resi;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    toSelect.push({chain: atom.chain, resi: atom.resi});
+                }
+            });
+            selectResidues(toSelect, false);
         }
 
         function selectAll() {
             if (!viewer) return;
 
             let atoms = viewer.getModel().selectedAtoms({});
-            let residues = [...new Set(atoms.map(a => a.resi))];
-            selectResidues(residues, false);
+            let toSelect = [];
+            let seen = new Set();
+
+            atoms.forEach(function(atom) {
+                let key = atom.chain + ':' + atom.resi;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    toSelect.push({chain: atom.chain, resi: atom.resi});
+                }
+            });
+            selectResidues(toSelect, false);
         }
 
         function clearSelection() {
-            selectedResidues.clear();
+            selectedResidues = [];
             applyCurrentStyle();
         }
 
@@ -254,27 +296,36 @@ VIEWER_HTML = """
             if (!viewer) return;
 
             let atoms = viewer.getModel().selectedAtoms({});
-            let allResidues = new Set(atoms.map(a => a.resi));
-            let newSelection = [];
+            let allResidues = [];
+            let seen = new Set();
 
-            allResidues.forEach(function(resId) {
-                if (!selectedResidues.has(resId)) {
-                    newSelection.push(resId);
+            atoms.forEach(function(atom) {
+                let key = atom.chain + ':' + atom.resi;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    allResidues.push({chain: atom.chain, resi: atom.resi});
                 }
             });
 
-            selectedResidues.clear();
-            newSelection.forEach(r => selectedResidues.add(r));
+            // Filter to get residues NOT currently selected
+            let newSelection = allResidues.filter(function(r) {
+                return !isSelected(r.chain, r.resi);
+            });
+
+            selectedResidues = newSelection;
             applyCurrentStyle();
         }
 
         function getSelection() {
-            return JSON.stringify(Array.from(selectedResidues));
+            return JSON.stringify(selectedResidues);
         }
 
         function zoomToSelection() {
-            if (!viewer || selectedResidues.size === 0) return;
-            viewer.zoomTo({resi: Array.from(selectedResidues)});
+            if (!viewer || selectedResidues.length === 0) return;
+            // Build selector for all selected residues
+            let selectors = selectedResidues.map(s => ({chain: s.chain, resi: s.resi}));
+            // Zoom to first selected residue for now (3Dmol limitation)
+            viewer.zoomTo({chain: selectors[0].chain, resi: selectors[0].resi});
             viewer.render();
         }
 
@@ -286,13 +337,15 @@ VIEWER_HTML = """
         }
 
         function setSelectionColor(color) {
-            if (!viewer || selectedResidues.size === 0) return;
+            if (!viewer || selectedResidues.length === 0) return;
 
-            let selArray = Array.from(selectedResidues);
             let styleSpec = {};
             styleSpec[currentStyle] = {color: color};
 
-            viewer.setStyle({resi: selArray}, styleSpec);
+            // Apply color to each selected residue individually (chain-aware)
+            selectedResidues.forEach(function(sel) {
+                viewer.setStyle({chain: sel.chain, resi: sel.resi}, styleSpec);
+            });
             viewer.render();
         }
 
@@ -333,12 +386,12 @@ class ProteinViewer(QWidget):
     Signals:
         structure_loaded: Emitted when a structure is successfully loaded.
         error_occurred: Emitted when an error occurs (with error message).
-        selection_changed: Emitted when residue selection changes.
+        selection_changed: Emitted when residue selection changes (list of {chain, id} dicts).
     """
 
     structure_loaded = pyqtSignal(str)  # Emits the file path
     error_occurred = pyqtSignal(str)  # Emits error message
-    selection_changed = pyqtSignal(list)  # Emits list of selected residue IDs
+    selection_changed = pyqtSignal(list)  # Emits list of {chain, id} dicts
 
     def __init__(self, parent=None):
         """Initialize the protein viewer widget.
@@ -350,8 +403,8 @@ class ProteinViewer(QWidget):
         self._current_file: str | None = None
         self._current_scheme: ColorScheme = SpectrumScheme()
         self._current_style: str = "cartoon"
-        self._selected_residues: list[int] = []
-        self._interface_residues: list[int] = []
+        self._selected_residues: list[dict] = []  # List of {chain, id} dicts
+        self._interface_residues: list[dict] = []  # List of {chain, id} dicts
         self._init_ui()
 
     def _init_ui(self):
@@ -419,8 +472,8 @@ class ProteinViewer(QWidget):
         self._web_view.page().runJavaScript("clearViewer();")
         self._header.setText("No structure loaded")
         self._current_file = None
-        self._selected_residues = []
-        self._interface_residues = []
+        self._selected_residues = []  # List of {chain, id} dicts
+        self._interface_residues = []  # List of {chain, id} dicts
         self._sequence_viewer.clear()
 
     def set_style(self, style: str) -> None:
@@ -493,21 +546,23 @@ class ProteinViewer(QWidget):
         return f"#{r:02x}{g:02x}{b:02x}"
 
     # Selection methods
-    def select_residues(self, residue_ids: list[int], add_to_selection: bool = False) -> None:
+    def select_residues(self, residues: list[dict], add_to_selection: bool = False) -> None:
         """Select specific residues.
 
         Args:
-            residue_ids: List of residue IDs to select.
+            residues: List of dicts with 'chain' and 'id' keys.
             add_to_selection: If True, add to current selection; otherwise replace.
         """
-        ids_json = json.dumps(residue_ids)
+        # Convert to JavaScript format (chain, resi)
+        js_residues = [{"chain": r["chain"], "resi": r["id"]} for r in residues]
+        residues_json = json.dumps(js_residues)
         add_flag = "true" if add_to_selection else "false"
-        self._web_view.page().runJavaScript(f"selectResidues({ids_json}, {add_flag});")
+        self._web_view.page().runJavaScript(f"selectResidues({residues_json}, {add_flag});")
 
         if add_to_selection:
-            self._selected_residues.extend(residue_ids)
+            self._selected_residues.extend(residues)
         else:
-            self._selected_residues = residue_ids.copy()
+            self._selected_residues = residues.copy()
 
         self.selection_changed.emit(self._selected_residues)
 
@@ -537,7 +592,7 @@ class ProteinViewer(QWidget):
     def clear_selection(self) -> None:
         """Clear the current selection."""
         self._web_view.page().runJavaScript("clearSelection();")
-        self._selected_residues = []
+        self._selected_residues = []  # List of {chain, id} dicts
         self.selection_changed.emit([])
 
     def invert_selection(self) -> None:
@@ -561,8 +616,8 @@ class ProteinViewer(QWidget):
         self._web_view.page().runJavaScript(f"setSelectionColor('{color}');")
 
     @property
-    def selected_residues(self) -> list[int]:
-        """Get the currently selected residue IDs."""
+    def selected_residues(self) -> list[dict]:
+        """Get the currently selected residues as list of {chain, id} dicts."""
         return self._selected_residues.copy()
 
     def _show_error(self, title: str, message: str) -> None:
@@ -604,18 +659,20 @@ class ProteinViewer(QWidget):
         self._sequence_viewer.set_sequence(sequence)
         logger.debug("ProteinViewer.set_sequence: called _sequence_viewer.set_sequence()")
 
-    def set_interface_residues(self, residue_ids: list[int]) -> None:
+    def set_interface_residues(self, interface: list[dict]) -> None:
         """Highlight interface residues in the viewer.
 
         Args:
-            residue_ids: List of interface residue IDs.
+            interface: List of dicts with 'chain' and 'id' keys.
         """
-        self._interface_residues = residue_ids.copy()
-        self._sequence_viewer.set_interface_residues(residue_ids)
+        self._interface_residues = interface.copy()
+        self._sequence_viewer.set_interface_residues(interface)
 
-        # Also highlight in 3D viewer (orange color)
-        if residue_ids:
-            ids_json = json.dumps(residue_ids)
+        # Also highlight in 3D viewer (orange color) - use just resi for now
+        # TODO: Update highlightInterfaceResidues to be chain-aware
+        if interface:
+            ids = [r["id"] for r in interface]
+            ids_json = json.dumps(ids)
             self._web_view.page().runJavaScript(
                 f"highlightInterfaceResidues({ids_json});"
             )
@@ -626,14 +683,14 @@ class ProteinViewer(QWidget):
         self._sequence_viewer.clear_interface()
         self._web_view.page().runJavaScript("clearInterfaceHighlight();")
 
-    def _on_sequence_selection_changed(self, residue_ids: list[int]) -> None:
+    def _on_sequence_selection_changed(self, selection: list[dict]) -> None:
         """Handle selection change from sequence viewer.
 
         Args:
-            residue_ids: List of selected residue IDs.
+            selection: List of dicts with 'chain' and 'id' keys.
         """
         # Update 3D viewer selection
-        self.select_residues(residue_ids, add_to_selection=False)
+        self.select_residues(selection, add_to_selection=False)
 
     def sync_selection_to_sequence(self) -> None:
         """Sync the current 3D selection to the sequence viewer."""
@@ -657,6 +714,6 @@ class ProteinViewer(QWidget):
         return self._sequence_viewer
 
     @property
-    def interface_residues(self) -> list[int]:
-        """Get the current interface residue IDs."""
+    def interface_residues(self) -> list[dict]:
+        """Get the current interface residues as list of {chain, id} dicts."""
         return self._interface_residues.copy()
