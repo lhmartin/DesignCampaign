@@ -7,6 +7,24 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
+# Boltz JSON format metrics that can be extracted
+BOLTZ_METRICS = {
+    "pLDDT_score": "Overall pLDDT confidence score",
+    "confidence_score": "Overall confidence score",
+    "ptm": "Predicted TM-score",
+    "iptm": "Interface predicted TM-score",
+    "ligand_iptm": "Ligand interface pTM",
+    "protein_iptm": "Protein interface pTM",
+    "complex_plddt": "Complex pLDDT score",
+    "complex_iplddt": "Complex interface pLDDT",
+    "complex_pde": "Complex PDE score",
+    "complex_ipde": "Complex interface PDE",
+}
+
+# Default metrics to import from Boltz format
+DEFAULT_BOLTZ_METRICS = ["pLDDT_score", "ptm", "iptm", "confidence_score"]
+
+
 @dataclass
 class ProteinMetrics:
     """Metrics data for a single protein.
@@ -331,20 +349,15 @@ class MetricsStore:
         return count
 
     def load_json(self, file_path: str | Path) -> int:
-        """Load metrics from a JSON file.
+        """Load metrics from a JSON file with auto-format detection.
 
-        Expected format:
-        {
-            "proteins": [
-                {"name": "protein1", "metrics": {"metric1": 0.5, ...}},
-                ...
-            ]
-        }
-        Or a simple list:
-        [
-            {"name": "protein1", "metrics": {"metric1": 0.5, ...}},
-            ...
-        ]
+        Supports two formats:
+        1. Standard format:
+           {"proteins": [{"name": "...", "metrics": {...}}, ...]}
+           or [{"name": "...", "metrics": {...}}, ...]
+
+        2. Boltz format (single protein):
+           {"sequence_name": "...", "pLDDT_score": ..., ...}
 
         Args:
             file_path: Path to JSON file.
@@ -363,7 +376,11 @@ class MetricsStore:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        # Handle both formats
+        # Auto-detect format
+        if self._is_boltz_format(data):
+            return self._load_boltz_data(data, file_path)
+
+        # Handle standard format
         if isinstance(data, dict):
             proteins_data = data.get("proteins", [])
         elif isinstance(data, list):
@@ -395,6 +412,196 @@ class MetricsStore:
             count += 1
 
         return count
+
+    @staticmethod
+    def _is_boltz_format(data: Any) -> bool:
+        """Check if data is in Boltz JSON format.
+
+        Args:
+            data: Parsed JSON data.
+
+        Returns:
+            True if data appears to be Boltz format.
+        """
+        if not isinstance(data, dict):
+            return False
+        # Boltz format has sequence_name and pLDDT_score
+        return "sequence_name" in data and "pLDDT_score" in data
+
+    def _load_boltz_data(
+        self,
+        data: dict,
+        file_path: Path,
+        metrics_to_extract: list[str] | None = None,
+    ) -> int:
+        """Load metrics from Boltz format data.
+
+        Args:
+            data: Parsed Boltz JSON data.
+            file_path: Path to the JSON file.
+            metrics_to_extract: List of metric names to extract, or None for defaults.
+
+        Returns:
+            Number of proteins loaded (0 or 1).
+        """
+        if metrics_to_extract is None:
+            metrics_to_extract = DEFAULT_BOLTZ_METRICS
+
+        name = data.get("sequence_name", "").strip()
+        if not name:
+            # Fall back to filename without extension
+            name = file_path.stem
+
+        metrics = {}
+        for metric_name in metrics_to_extract:
+            if metric_name in data:
+                value = data[metric_name]
+                if isinstance(value, (int, float)):
+                    metrics[metric_name] = float(value)
+
+        # Also extract chain-specific PTM scores if available
+        chains_ptm = data.get("chains_ptm", {})
+        if isinstance(chains_ptm, dict):
+            for chain_id, ptm_value in chains_ptm.items():
+                if isinstance(ptm_value, (int, float)):
+                    metrics[f"ptm_chain_{chain_id}"] = float(ptm_value)
+
+        # Get associated PDB file path if available
+        pdb_file = data.get("file")
+        if pdb_file and isinstance(pdb_file, str):
+            # Check if local file exists
+            local_pdb = file_path.parent / f"{name}.pdb"
+            if local_pdb.exists():
+                pdb_file = str(local_pdb)
+
+        protein = ProteinMetrics(
+            name=name,
+            file_path=pdb_file if pdb_file else None,
+            metrics=metrics,
+        )
+        self.add_protein(protein)
+        return 1
+
+    def load_boltz_json(
+        self,
+        file_path: str | Path,
+        metrics_to_extract: list[str] | None = None,
+    ) -> int:
+        """Load metrics from a single Boltz JSON file.
+
+        Args:
+            file_path: Path to Boltz JSON file.
+            metrics_to_extract: List of metric names to extract, or None for defaults.
+
+        Returns:
+            Number of proteins loaded (0 or 1).
+
+        Raises:
+            FileNotFoundError: If file doesn't exist.
+            ValueError: If not a valid Boltz JSON file.
+        """
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not self._is_boltz_format(data):
+            raise ValueError(f"Not a valid Boltz JSON file: {file_path}")
+
+        return self._load_boltz_data(data, file_path, metrics_to_extract)
+
+    def load_boltz_folder(
+        self,
+        folder_path: str | Path,
+        metrics_to_extract: list[str] | None = None,
+    ) -> int:
+        """Load metrics from all Boltz JSON files in a folder.
+
+        Args:
+            folder_path: Path to folder containing Boltz JSON files.
+            metrics_to_extract: List of metric names to extract, or None for defaults.
+
+        Returns:
+            Number of proteins loaded.
+
+        Raises:
+            FileNotFoundError: If folder doesn't exist.
+        """
+        folder_path = Path(folder_path)
+        if not folder_path.exists():
+            raise FileNotFoundError(f"Folder not found: {folder_path}")
+        if not folder_path.is_dir():
+            raise ValueError(f"Not a directory: {folder_path}")
+
+        count = 0
+        for json_file in folder_path.glob("*.json"):
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                if self._is_boltz_format(data):
+                    count += self._load_boltz_data(data, json_file, metrics_to_extract)
+            except (json.JSONDecodeError, IOError):
+                # Skip files that can't be read
+                continue
+
+        return count
+
+    @staticmethod
+    def get_boltz_metrics_info() -> dict[str, str]:
+        """Get information about available Boltz metrics.
+
+        Returns:
+            Dict mapping metric names to descriptions.
+        """
+        return BOLTZ_METRICS.copy()
+
+    @staticmethod
+    def get_default_boltz_metrics() -> list[str]:
+        """Get default list of metrics to extract from Boltz files.
+
+        Returns:
+            List of metric names.
+        """
+        return DEFAULT_BOLTZ_METRICS.copy()
+
+    @staticmethod
+    def detect_boltz_metrics(file_path: str | Path) -> list[str]:
+        """Detect available metrics in a Boltz JSON file.
+
+        Args:
+            file_path: Path to Boltz JSON file.
+
+        Returns:
+            List of available metric names.
+        """
+        file_path = Path(file_path)
+        if not file_path.exists():
+            return []
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return []
+
+        if not isinstance(data, dict):
+            return []
+
+        available = []
+        for metric_name in BOLTZ_METRICS:
+            if metric_name in data and isinstance(data[metric_name], (int, float)):
+                available.append(metric_name)
+
+        # Also check for chain-specific PTM
+        chains_ptm = data.get("chains_ptm", {})
+        if isinstance(chains_ptm, dict):
+            for chain_id in chains_ptm:
+                available.append(f"ptm_chain_{chain_id}")
+
+        return available
 
     def save_csv(self, file_path: str | Path) -> None:
         """Save metrics to a CSV file.

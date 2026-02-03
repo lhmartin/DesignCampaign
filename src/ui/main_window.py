@@ -29,6 +29,7 @@ from src.ui.file_list import FileListWidget
 from src.ui.viewer import ProteinViewer
 from src.ui.selection_panel import SelectionPanel
 from src.ui.metrics_table import MetricsTableWidget
+from src.ui.boltz_import_dialog import BoltzImportDialog
 from src.models.protein import Protein
 from src.models.metrics import MetricResult
 from src.models.metrics_store import MetricsStore, ProteinMetrics
@@ -175,6 +176,18 @@ class MainWindow(QMainWindow):
         import_json_action.setStatusTip("Import metrics from a JSON file")
         import_json_action.triggered.connect(self._on_import_json)
         import_menu.addAction(import_json_action)
+
+        import_menu.addSeparator()
+
+        import_boltz_file_action = QAction("From &Boltz JSON File...", self)
+        import_boltz_file_action.setStatusTip("Import metrics from a Boltz JSON file")
+        import_boltz_file_action.triggered.connect(self._on_import_boltz_file)
+        import_menu.addAction(import_boltz_file_action)
+
+        import_boltz_folder_action = QAction("From Boltz JSON &Folder...", self)
+        import_boltz_folder_action.setStatusTip("Import metrics from all Boltz JSON files in a folder")
+        import_boltz_folder_action.triggered.connect(self._on_import_boltz_folder)
+        import_menu.addAction(import_boltz_folder_action)
 
         # Export submenu
         export_menu = file_menu.addMenu("&Export Metrics")
@@ -599,6 +612,82 @@ class MainWindow(QMainWindow):
                 self._statusbar.showMessage(f"Imported {count} proteins from JSON")
             except Exception as e:
                 QMessageBox.critical(self, "Import Error", f"Failed to import JSON: {e}")
+
+    def _on_import_boltz_file(self):
+        """Handle Import > Boltz JSON File action."""
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Import Boltz JSON Files",
+            "",
+            "JSON Files (*.json);;All Files (*)",
+        )
+        if file_paths:
+            self._show_boltz_import_dialog(file_paths=file_paths)
+
+    def _on_import_boltz_folder(self):
+        """Handle Import > Boltz JSON Folder action."""
+        folder_path = QFileDialog.getExistingDirectory(
+            self,
+            "Select Folder with Boltz JSON Files",
+            "",
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if folder_path:
+            self._show_boltz_import_dialog(folder_path=folder_path)
+
+    def _show_boltz_import_dialog(
+        self,
+        file_paths: list[str] | None = None,
+        folder_path: str | None = None,
+    ):
+        """Show the Boltz import dialog and process import.
+
+        Args:
+            file_paths: List of Boltz JSON file paths.
+            folder_path: Folder containing Boltz JSON files.
+        """
+        dialog = BoltzImportDialog(
+            self,
+            file_paths=file_paths,
+            folder_path=folder_path,
+        )
+
+        if dialog.exec() == BoltzImportDialog.DialogCode.Accepted:
+            selected_metrics = dialog.get_selected_metrics()
+            if not selected_metrics:
+                QMessageBox.warning(
+                    self,
+                    "Import",
+                    "No metrics selected for import."
+                )
+                return
+
+            try:
+                if dialog.folder_path:
+                    count = self._metrics_store.load_boltz_folder(
+                        dialog.folder_path,
+                        metrics_to_extract=selected_metrics,
+                    )
+                else:
+                    count = 0
+                    for file_path in dialog.get_file_paths():
+                        count += self._metrics_store.load_boltz_json(
+                            file_path,
+                            metrics_to_extract=selected_metrics,
+                        )
+
+                self._metrics_table.set_store(self._metrics_store)
+                self._left_tabs.setCurrentWidget(self._metrics_table)
+                self._statusbar.showMessage(
+                    f"Imported {count} proteins from Boltz JSON"
+                )
+
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Import Error",
+                    f"Failed to import Boltz JSON: {e}"
+                )
 
     def _on_export_csv(self):
         """Handle Export > CSV action."""
