@@ -291,20 +291,27 @@ class SequenceViewer(QWidget):
         self._label.setText(f"Sequence: {num_residues} residues ({chain_str})")
 
         # CRITICAL: Explicitly set container size since adjustSize() doesn't work with scroll area
-        # Calculate width based on number of widgets in layout
+        # Calculate width directly using known fixed cell sizes (sizeHint() returns 0 before layout)
         spacing = self._sequence_layout.spacing()
         margins = self._sequence_layout.contentsMargins()
-        total_width = margins.left() + margins.right()
 
-        for i in range(self._sequence_layout.count()):
-            item = self._sequence_layout.itemAt(i)
-            if item and item.widget():
-                total_width += item.widget().sizeHint().width() + spacing
+        # Count cells and separators
+        num_cells = len(self._residue_cells)
+        num_separators = len(chains) - 1 if len(chains) > 1 else 0
+
+        # Calculate total width: margins + cells + separators + spacing between all widgets
+        total_widgets = num_cells + num_separators
+        total_width = (
+            margins.left() + margins.right() +
+            num_cells * ResidueCell.CELL_WIDTH +
+            num_separators * 24 +  # ChainSeparator width is 24
+            (total_widgets - 1) * spacing if total_widgets > 0 else 0
+        )
 
         # Set fixed size for container - height is cell height
         container_height = ResidueCell.CELL_HEIGHT
         self._sequence_container.setFixedSize(total_width, container_height)
-        logger.debug(f"SequenceViewer.set_sequence: container size set to {total_width}x{container_height}")
+        logger.debug(f"SequenceViewer.set_sequence: container size set to {total_width}x{container_height} ({num_cells} cells, {num_separators} separators)")
 
     def clear(self) -> None:
         """Clear the sequence display."""
