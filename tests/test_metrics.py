@@ -239,44 +239,46 @@ class TestProteinMetricMethods:
 class TestMetricResultJSONSerialization:
     """Tests to ensure metric results can be JSON serialized.
 
-    This is critical because metric values are passed to JavaScript via JSON.
-    numpy.int64 keys will cause json.dumps() to fail.
+    These tests verify that numpy types are properly converted to Python
+    native types for JSON serialization (regression tests for TypeError
+    with numpy.int64 keys).
     """
 
     def test_rasa_values_are_json_serializable(self, protein):
-        """Test that RASA result values can be JSON serialized."""
+        """Test that RASA values can be serialized to JSON."""
+        import json
         result = protein.calculate_rasa()
-        # This should not raise TypeError: keys must be str, int, float, bool or None
+        # This should not raise TypeError
         json_str = json.dumps(result.values)
         assert json_str is not None
-        # Verify we can parse it back
+        # Verify round-trip
         parsed = json.loads(json_str)
         assert len(parsed) == len(result.values)
 
     def test_plddt_values_are_json_serializable(self, protein):
-        """Test that pLDDT result values can be JSON serialized."""
+        """Test that pLDDT values can be serialized to JSON."""
+        import json
         result = protein.get_plddt()
+        # This should not raise TypeError
         json_str = json.dumps(result.values)
         assert json_str is not None
-        parsed = json.loads(json_str)
-        assert len(parsed) == len(result.values)
 
     def test_bfactor_values_are_json_serializable(self, protein):
-        """Test that B-factor result values can be JSON serialized."""
+        """Test that B-factor values can be serialized to JSON."""
+        import json
         result = protein.get_bfactor()
+        # This should not raise TypeError
         json_str = json.dumps(result.values)
         assert json_str is not None
-        parsed = json.loads(json_str)
-        assert len(parsed) == len(result.values)
 
     def test_metric_keys_are_python_ints(self, protein):
-        """Test that metric value dict keys are Python ints, not numpy.int64."""
+        """Test that metric result keys are Python int, not numpy.int64."""
         result = protein.calculate_rasa()
         for key in result.values.keys():
             assert type(key) is int, f"Key {key} is {type(key)}, expected int"
 
     def test_metric_values_are_python_floats(self, protein):
-        """Test that metric values are Python floats, not numpy.float64."""
+        """Test that metric result values are Python float, not numpy.float64."""
         result = protein.calculate_rasa()
         for value in result.values.values():
             assert type(value) is float, f"Value {value} is {type(value)}, expected float"

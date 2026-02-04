@@ -347,3 +347,4 @@ When working on this project:
 - **User feedback**: The UI should always provide feedback for user actions (loading indicators, success/error messages)
 - **Cross-platform**: Ensure code works on Windows, macOS, and Linux
 - **Python-first**: Use Python libraries and patterns; this is a Python project
+- **Don't-Post-Session**: Don't post session information in a PR

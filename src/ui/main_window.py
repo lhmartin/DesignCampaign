@@ -1,5 +1,6 @@
 """Main application window for DesignCampaign."""
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,8 @@ from src.ui.metrics_table import MetricsTableWidget
 from src.models.protein import Protein
 from src.models.metrics import MetricResult
 from src.models.metrics_store import MetricsStore, ProteinMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class MetricCalculationWorker(QThread):
@@ -300,6 +303,11 @@ class MainWindow(QMainWindow):
         self._selection_panel.selection_requested.connect(self._on_selection_requested)
         self._selection_panel.color_scheme_changed.connect(self._on_color_scheme_changed)
         self._selection_panel.metric_coloring_requested.connect(self._on_metric_coloring_requested)
+        self._selection_panel.interface_requested.connect(self._on_interface_requested)
+        self._selection_panel.select_interface_requested.connect(self._on_select_interface)
+        self._selection_panel.export_selection_requested.connect(self._on_export_selection)
+        self._selection_panel.clear_interface_requested.connect(self._on_clear_interface_requested)
+        self._selection_panel.selection_color_requested.connect(self._on_selection_color_requested)
 
         # Connect metrics table signals
         self._metrics_table.protein_selected.connect(self._on_metrics_protein_selected)
@@ -342,17 +350,24 @@ class MainWindow(QMainWindow):
         Args:
             file_path: Path to the protein structure file.
         """
+        logger.debug(f"MainWindow._load_protein: loading {file_path}")
         self._statusbar.showMessage(f"Loading: {file_path}")
-        self._viewer.load_structure(file_path)
 
-        # Load protein model for metrics
+        # Load protein model FIRST (before viewer emits structure_loaded signal)
+        # This fixes race condition where signal fires before _current_protein is set
         try:
             self._current_protein = Protein(file_path)
             # Pre-load structure for faster metric calculation
             _ = self._current_protein.structure
+            logger.debug(f"MainWindow._load_protein: Protein model created successfully")
         except Exception as e:
+            logger.error(f"MainWindow._load_protein: failed to create Protein model: {e}")
             self._statusbar.showMessage(f"Warning: Could not load structure model: {e}")
             self._current_protein = None
+
+        # Now load in viewer (structure_loaded signal will have valid _current_protein)
+        logger.debug(f"MainWindow._load_protein: calling viewer.load_structure()")
+        self._viewer.load_structure(file_path)
 
     def _on_folder_changed(self, folder_path: str):
         """Handle folder change.
@@ -370,15 +385,29 @@ class MainWindow(QMainWindow):
         Args:
             file_path: Path to the loaded structure.
         """
+        logger.debug(f"MainWindow._on_structure_loaded: received signal for {file_path}")
+        logger.debug(f"MainWindow._on_structure_loaded: _current_protein is {'set' if self._current_protein else 'None'}")
         self._statusbar.showMessage(f"Loaded: {file_path}")
 
         # Update selection panel with structure info
         if self._current_protein:
             chains = self._current_protein.get_chains()
+            logger.debug(f"MainWindow._on_structure_loaded: chains = {chains}")
             self._selection_panel.set_chains(chains)
 
             num_residues = self._current_protein.get_num_residues()
+            logger.debug(f"MainWindow._on_structure_loaded: num_residues = {num_residues}")
             self._selection_panel.set_selection_count(0, num_residues)
+
+            # Load sequence into viewer
+            sequence = self._current_protein.get_sequence()
+            logger.debug(f"MainWindow._on_structure_loaded: sequence length = {len(sequence)}")
+            if sequence:
+                logger.debug(f"MainWindow._on_structure_loaded: first 3 sequence entries = {sequence[:3]}")
+            self._viewer.set_sequence(sequence)
+            logger.debug("MainWindow._on_structure_loaded: set_sequence() called")
+        else:
+            logger.warning("MainWindow._on_structure_loaded: _current_protein is None, skipping sequence load")
 
     def _on_error(self, message: str):
         """Handle error from viewer.
@@ -388,15 +417,21 @@ class MainWindow(QMainWindow):
         """
         self._statusbar.showMessage(f"Error: {message}")
 
-    def _on_selection_changed(self, residue_ids: list[int]):
+    def _on_selection_changed(self, selection: list[dict]):
         """Handle selection change in viewer.
 
         Args:
-            residue_ids: List of selected residue IDs.
+            selection: List of dicts with 'chain' and 'id' keys.
         """
         if self._current_protein:
             total = self._current_protein.get_num_residues()
-            self._selection_panel.set_selection_count(len(residue_ids), total)
+            self._selection_panel.set_selection_count(len(selection), total)
+            # Pass just the residue IDs to selection panel for now
+            residue_ids = [r["id"] for r in selection]
+            self._selection_panel.set_selected_residues(residue_ids)
+
+        # Sync to sequence viewer
+        self._viewer.sync_selection_to_sequence()
 
     def _on_selection_requested(self, action: str, params: Any):
         """Handle selection request from panel.
@@ -733,12 +768,138 @@ class MainWindow(QMainWindow):
         """Get the selection panel widget."""
         return self._selection_panel
 
-    @property
-    def metrics_table(self) -> MetricsTableWidget:
-        """Get the metrics table widget."""
-        return self._metrics_table
+    # Interface handlers
 
-    @property
-    def metrics_store(self) -> MetricsStore:
-        """Get the metrics store."""
-        return self._metrics_store
+    def _on_interface_requested(self, binder_chain: str, target_chains: list[str], cutoff: float):
+        """Handle interface calculation request.
+
+        Args:
+            binder_chain: Chain ID for the binder.
+            target_chains: List of chain IDs for the target.
+            cutoff: Distance cutoff in Angstroms.
+        """
+        if not self._current_protein:
+            self._statusbar.showMessage("No structure loaded")
+            return
+
+        self._statusbar.showMessage(f"Calculating interface ({binder_chain} vs {target_chains})...")
+
+        try:
+            interface = self._current_protein.get_interface_residues(
+                binder_chain=binder_chain,
+                target_chains=target_chains,
+                distance_cutoff=cutoff,
+            )
+
+            # Interface is dict mapping residue ID to amino acid
+            # Convert to list of dicts with chain info (interface residues are on binder chain)
+            residue_ids = list(interface.keys())
+            interface_list = [{"chain": binder_chain, "id": res_id} for res_id in residue_ids]
+
+            self._selection_panel.set_interface_result(residue_ids)
+            self._viewer.set_interface_residues(interface_list)
+
+            if residue_ids:
+                self._statusbar.showMessage(f"Found {len(residue_ids)} interface residues")
+            else:
+                self._statusbar.showMessage("No interface residues found at this cutoff")
+
+        except Exception as e:
+            self._statusbar.showMessage(f"Interface calculation failed: {e}")
+            self._selection_panel.set_interface_result([])
+
+    def _on_select_interface(self):
+        """Handle select interface residues request."""
+        interface_ids = self._selection_panel.get_interface_residues()
+        if interface_ids:
+            # Get the binder chain from the selection panel
+            binder_chain = self._selection_panel.get_binder_chain()
+            # Convert to list of dicts with chain info
+            interface_list = [{"chain": binder_chain, "id": res_id} for res_id in interface_ids]
+            self._viewer.select_residues(interface_list)
+            self._statusbar.showMessage(f"Selected {len(interface_ids)} interface residues")
+
+    def _on_clear_interface_requested(self):
+        """Handle clear interface request."""
+        self._viewer.clear_interface()
+        self._statusbar.showMessage("Interface highlighting cleared")
+
+    def _on_selection_color_requested(self, color: str):
+        """Handle selection coloring request.
+
+        Args:
+            color: Hex color string (e.g., '#ff0000').
+        """
+        self._viewer.set_selection_color(color)
+        self._statusbar.showMessage(f"Applied color {color} to selection")
+
+    # Export handlers
+
+    def _on_export_selection(self, format_type: str, file_path: str):
+        """Handle selection export request.
+
+        Args:
+            format_type: Export format ('fasta' or 'csv').
+            file_path: Output file path.
+        """
+        if not self._current_protein:
+            self._statusbar.showMessage("No structure loaded")
+            return
+
+        selected = self._viewer.selected_residues
+        if not selected:
+            self._statusbar.showMessage("No residues selected")
+            return
+
+        try:
+            sequence = self._current_protein.get_sequence()
+
+            # Build set of (chain, id) tuples for selected residues
+            selected_set = {(r["chain"], r["id"]) for r in selected}
+            selected_residues = [r for r in sequence if (r["chain"], r["id"]) in selected_set]
+
+            if format_type == "fasta":
+                self._export_fasta(file_path, selected_residues)
+            else:
+                self._export_csv(file_path, selected_residues)
+
+            self._statusbar.showMessage(f"Exported {len(selected_residues)} residues to {file_path}")
+
+        except Exception as e:
+            self._statusbar.showMessage(f"Export failed: {e}")
+
+    def _export_fasta(self, file_path: str, residues: list[dict]) -> None:
+        """Export residues as FASTA format.
+
+        Args:
+            file_path: Output file path.
+            residues: List of residue dicts.
+        """
+        sequence = "".join(r["one_letter"] for r in residues)
+        name = self._current_protein.name if self._current_protein else "selection"
+
+        # Create FASTA header with residue range info
+        if residues:
+            first_id = residues[0]["id"]
+            last_id = residues[-1]["id"]
+            header = f">{name}_residues_{first_id}-{last_id}"
+        else:
+            header = f">{name}_selection"
+
+        with open(file_path, "w") as f:
+            f.write(f"{header}\n")
+            # Write sequence in lines of 60 characters
+            for i in range(0, len(sequence), 60):
+                f.write(f"{sequence[i:i+60]}\n")
+
+    def _export_csv(self, file_path: str, residues: list[dict]) -> None:
+        """Export residues as CSV format.
+
+        Args:
+            file_path: Output file path.
+            residues: List of residue dicts.
+        """
+        with open(file_path, "w") as f:
+            f.write("residue_id,chain,residue_name,one_letter\n")
+            for r in residues:
+                f.write(f"{r['id']},{r['chain']},{r['name']},{r['one_letter']}\n")
