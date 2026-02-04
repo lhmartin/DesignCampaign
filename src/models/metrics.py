@@ -80,6 +80,7 @@ def calculate_rasa(structure: AtomArray) -> MetricResult:
     atom_sasa = sasa(aa_structure)
 
     # Aggregate SASA per residue
+    # Use int() to convert numpy.int64 to Python int for JSON serialization
     residue_ids, residue_names = get_residues(aa_structure)
     residue_sasa: dict[int, float] = {}
     residue_names_map: dict[int, str] = {}
@@ -147,6 +148,7 @@ def extract_plddt(structure: AtomArray) -> MetricResult:
         )
 
     # Get CA atoms for per-residue pLDDT
+    # Use int() to convert numpy.int64 to Python int for JSON serialization
     ca_mask = aa_structure.atom_name == "CA"
     ca_atoms = aa_structure[ca_mask]
 
@@ -202,15 +204,16 @@ def extract_bfactor(structure: AtomArray) -> MetricResult:
         )
 
     # Average B-factor per residue
+    # Use int() to convert numpy.int64 to Python int for JSON serialization
     residue_bfactors: dict[int, list[float]] = {}
     for res_id, b_factor in zip(aa_structure.res_id, aa_structure.b_factor):
-        res_id = int(res_id)
-        if res_id not in residue_bfactors:
-            residue_bfactors[res_id] = []
-        residue_bfactors[res_id].append(float(b_factor))
+        res_id_int = int(res_id)
+        if res_id_int not in residue_bfactors:
+            residue_bfactors[res_id_int] = []
+        residue_bfactors[res_id_int].append(float(b_factor))
 
     bfactor_values: dict[int, float] = {
-        res_id: np.mean(bfs) for res_id, bfs in residue_bfactors.items()
+        res_id: float(np.mean(bfs)) for res_id, bfs in residue_bfactors.items()
     }
 
     values_list = list(bfactor_values.values())

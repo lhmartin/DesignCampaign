@@ -1,5 +1,6 @@
 """Tests for protein metrics calculations."""
 
+import json
 import pytest
 from pathlib import Path
 
