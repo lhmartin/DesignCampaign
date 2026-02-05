@@ -20,6 +20,9 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 
+from src.config.theme_manager import get_theme_manager
+from src.config.settings import Theme
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,10 +31,22 @@ class ResidueCell(QWidget):
 
     clicked = pyqtSignal(str, int, bool)  # (chain, residue_id, ctrl_held)
 
-    # Cell styling constants
+    # Cell size configurations
+    CELL_SIZES = {
+        "small": {"width": 14, "height": 18, "font": 8},
+        "medium": {"width": 18, "height": 24, "font": 10},
+        "large": {"width": 22, "height": 28, "font": 11},
+    }
+
+    # Default cell styling constants
     CELL_WIDTH = 22
     CELL_HEIGHT = 28
     FONT_SIZE = 11
+
+    # Theme colors (class-level, updated by theme manager)
+    _theme_bg = "#f8f8f8"
+    _theme_fg = "#333333"
+    _theme_border = "#cccccc"
 
     def __init__(
         self,
@@ -91,7 +106,7 @@ class ResidueCell(QWidget):
         elif self._selected:
             bg_color = QColor("#ffff00")  # Yellow for selection
         else:
-            bg_color = QColor("#f8f8f8")
+            bg_color = QColor(ResidueCell._theme_bg)
 
         # Draw background
         painter.fillRect(0, 0, self.width(), self.height(), bg_color)
@@ -118,8 +133,10 @@ class ResidueCell(QWidget):
             color = QColor(self._color)
             brightness = (color.red() * 299 + color.green() * 587 + color.blue() * 114) / 1000
             text_color = QColor("#000000") if brightness > 128 else QColor("#ffffff")
+        elif self._selected:
+            text_color = QColor("#333333")  # Dark text on yellow selection
         else:
-            text_color = QColor("#333333")
+            text_color = QColor(ResidueCell._theme_fg)
 
         painter.setPen(text_color)
         painter.drawText(
@@ -127,6 +144,19 @@ class ResidueCell(QWidget):
             Qt.AlignmentFlag.AlignCenter,
             self._one_letter
         )
+
+    @classmethod
+    def set_theme_colors(cls, bg: str, fg: str, border: str) -> None:
+        """Set theme colors for all cells.
+
+        Args:
+            bg: Background color hex string.
+            fg: Foreground (text) color hex string.
+            border: Border color hex string.
+        """
+        cls._theme_bg = bg
+        cls._theme_fg = fg
+        cls._theme_border = border
 
     @property
     def chain(self) -> str:
@@ -137,6 +167,21 @@ class ResidueCell(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
             self.clicked.emit(self._chain, self._residue_id, bool(ctrl))
+
+    def set_cell_size(self, size_name: str) -> None:
+        """Set the cell size.
+
+        Args:
+            size_name: One of "small", "medium", "large".
+        """
+        if size_name not in self.CELL_SIZES:
+            return
+        config = self.CELL_SIZES[size_name]
+        ResidueCell.CELL_WIDTH = config["width"]
+        ResidueCell.CELL_HEIGHT = config["height"]
+        ResidueCell.FONT_SIZE = config["font"]
+        self.setFixedSize(config["width"], config["height"])
+        self.update()
 
 
 class ChainSeparator(QFrame):
@@ -191,7 +236,10 @@ class SequenceViewer(QWidget):
         self._residue_cells: dict[tuple[str, int], ResidueCell] = {}
         self._selected_keys: set[tuple[str, int]] = set()  # set of (chain, id) tuples
         self._interface_keys: set[tuple[str, int]] = set()  # set of (chain, id) tuples
+        self._current_size: str = "large"  # Default size
+        self._cached_sequence: list[dict[str, Any]] | None = None
         self._init_ui()
+        self._setup_theme_listener()
 
     def _init_ui(self):
         """Initialize the UI."""
@@ -210,6 +258,31 @@ class SequenceViewer(QWidget):
         header_layout.addWidget(self._label)
 
         header_layout.addStretch()
+
+        # Size controls
+        size_label = QLabel("Size:")
+        size_label.setStyleSheet("font-size: 10px;")
+        header_layout.addWidget(size_label)
+
+        self._btn_size_small = QPushButton("S")
+        self._btn_size_small.setFixedSize(22, 20)
+        self._btn_size_small.setToolTip("Small cells")
+        self._btn_size_small.clicked.connect(lambda: self.set_cell_size("small"))
+        header_layout.addWidget(self._btn_size_small)
+
+        self._btn_size_medium = QPushButton("M")
+        self._btn_size_medium.setFixedSize(22, 20)
+        self._btn_size_medium.setToolTip("Medium cells")
+        self._btn_size_medium.clicked.connect(lambda: self.set_cell_size("medium"))
+        header_layout.addWidget(self._btn_size_medium)
+
+        self._btn_size_large = QPushButton("L")
+        self._btn_size_large.setFixedSize(22, 20)
+        self._btn_size_large.setToolTip("Large cells")
+        self._btn_size_large.clicked.connect(lambda: self.set_cell_size("large"))
+        header_layout.addWidget(self._btn_size_large)
+
+        header_layout.addSpacing(8)
 
         self._btn_scroll_to_selection = QPushButton("Go to Selection")
         self._btn_scroll_to_selection.setFixedHeight(20)
@@ -252,6 +325,9 @@ class SequenceViewer(QWidget):
             sequence: List of residue dicts with 'id', 'one_letter', 'name', 'chain'.
         """
         logger.debug(f"SequenceViewer.set_sequence: received {len(sequence) if sequence else 0} residues")
+
+        # Cache for size changes
+        self._cached_sequence = sequence
 
         # Clear existing cells
         self.clear()
@@ -424,3 +500,88 @@ class SequenceViewer(QWidget):
     def get_interface(self) -> list[dict[str, Any]]:
         """Get the interface residues as list of dicts."""
         return [{"chain": c, "id": r} for c, r in self._interface_keys]
+
+    def set_cell_size(self, size_name: str) -> None:
+        """Change the cell size and rebuild the sequence display.
+
+        Args:
+            size_name: One of "small", "medium", "large".
+        """
+        if size_name not in ResidueCell.CELL_SIZES:
+            return
+
+        if size_name == self._current_size:
+            return
+
+        self._current_size = size_name
+
+        # Update class-level constants
+        config = ResidueCell.CELL_SIZES[size_name]
+        ResidueCell.CELL_WIDTH = config["width"]
+        ResidueCell.CELL_HEIGHT = config["height"]
+        ResidueCell.FONT_SIZE = config["font"]
+
+        # Update scroll area height
+        self._scroll_area.setFixedHeight(ResidueCell.CELL_HEIGHT + 20)
+        self.setFixedHeight(ResidueCell.CELL_HEIGHT + 45)
+
+        # Rebuild sequence if we have one cached
+        if self._cached_sequence:
+            # Store current selection and interface
+            selected = self._selected_keys.copy()
+            interface = self._interface_keys.copy()
+
+            # Rebuild
+            self.set_sequence(self._cached_sequence)
+
+            # Restore selection and interface
+            self._selected_keys = selected
+            self._interface_keys = interface
+            for key, cell in self._residue_cells.items():
+                cell.set_selected(key in selected)
+                cell.set_interface(key in interface)
+
+    @property
+    def current_size(self) -> str:
+        """Get the current cell size name."""
+        return self._current_size
+
+    def _setup_theme_listener(self) -> None:
+        """Set up theme change listener."""
+        theme_manager = get_theme_manager()
+        theme_manager.add_listener(self._on_theme_changed)
+        # Apply current theme
+        self._on_theme_changed(theme_manager.current_theme)
+
+    def _on_theme_changed(self, theme: Theme) -> None:
+        """Handle theme change.
+
+        Args:
+            theme: New theme object.
+        """
+        # Update cell theme colors
+        if theme.name == "dark":
+            ResidueCell.set_theme_colors(
+                bg="#2d2d2d",
+                fg="#e0e0e0",
+                border="#555555",
+            )
+        else:
+            ResidueCell.set_theme_colors(
+                bg="#f8f8f8",
+                fg="#333333",
+                border="#cccccc",
+            )
+
+        # Update viewer background
+        bg_color = theme.secondary_background
+        self.setStyleSheet(f"""
+            SequenceViewer {{
+                background-color: {bg_color};
+                border-bottom: 1px solid {theme.border};
+            }}
+        """)
+
+        # Update all existing cells
+        for cell in self._residue_cells.values():
+            cell.update()

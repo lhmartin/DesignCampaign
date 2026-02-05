@@ -22,6 +22,8 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QCheckBox,
     QColorDialog,
+    QListWidget,
+    QListWidgetItem,
 )
 from PyQt6.QtGui import QColor, QPalette
 
@@ -30,6 +32,7 @@ from src.config.color_schemes import (
     get_color_scheme,
     ColorLegendItem,
     MetricScheme,
+    ChainScheme,
 )
 from src.models.metrics import AVAILABLE_METRICS
 
@@ -105,6 +108,9 @@ class SelectionPanel(QWidget):
     clear_interface_requested = pyqtSignal()  # clear interface highlighting
     export_selection_requested = pyqtSignal(str, str)  # (format, file_path)
     selection_color_requested = pyqtSignal(str)  # hex color for selection
+    binder_search_requested = pyqtSignal(list, float)  # (target_residues, cutoff)
+    binder_result_selected = pyqtSignal(str)  # file_path of selected binder
+    create_group_from_chain_requested = pyqtSignal(str, str)  # chain_id, group_name
 
     def __init__(self, parent=None):
         """Initialize the selection panel.
@@ -118,6 +124,8 @@ class SelectionPanel(QWidget):
         self._interface_residue_ids: list[int] = []
         self._selected_residue_ids: list[int] = []
         self._selected_color: str = "#ff0000"  # Default red for selection coloring
+        self._chain_ids: list[str] = []  # Current structure's chain IDs
+        self._chain_lengths: dict[str, int] = {}  # Chain ID -> residue count
         self._init_ui()
 
     def _init_ui(self):
@@ -141,6 +149,10 @@ class SelectionPanel(QWidget):
         interface_group = self._create_interface_group()
         main_layout.addWidget(interface_group)
 
+        # Binder search group
+        binder_search_group = self._create_binder_search_group()
+        main_layout.addWidget(binder_search_group)
+
         # Export group
         export_group = self._create_export_group()
         main_layout.addWidget(export_group)
@@ -152,6 +164,14 @@ class SelectionPanel(QWidget):
         # Metric coloring group
         metric_group = self._create_metric_group()
         main_layout.addWidget(metric_group)
+
+        # Sequence info group
+        seq_info_group = self._create_sequence_info_group()
+        main_layout.addWidget(seq_info_group)
+
+        # Chain group creation
+        chain_group_box = self._create_chain_group_group()
+        main_layout.addWidget(chain_group_box)
 
         # Legend group
         legend_group = self._create_legend_group()
@@ -364,6 +384,158 @@ class SelectionPanel(QWidget):
 
         return group
 
+    def _create_binder_search_group(self) -> QGroupBox:
+        """Create the binder search controls group."""
+        group = QGroupBox("Search Binders by Contact")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+
+        # Target residues input
+        residue_layout = QHBoxLayout()
+        residue_layout.setSpacing(4)
+
+        residue_label = QLabel("Target:")
+        residue_label.setFixedWidth(50)
+        residue_layout.addWidget(residue_label)
+
+        self._binder_search_input = QLineEdit()
+        self._binder_search_input.setPlaceholderText("A:45-50, A:72")
+        self._binder_search_input.setToolTip(
+            "Enter target residues to search for contacting binders.\n"
+            "Format: chain:residue or chain:start-end\n"
+            "Examples: A:45, A:45-50, A:45,A:72"
+        )
+        residue_layout.addWidget(self._binder_search_input)
+
+        layout.addLayout(residue_layout)
+
+        # Cutoff input
+        cutoff_layout = QHBoxLayout()
+        cutoff_layout.setSpacing(4)
+
+        cutoff_label = QLabel("Cutoff:")
+        cutoff_label.setFixedWidth(50)
+        cutoff_layout.addWidget(cutoff_label)
+
+        self._binder_search_cutoff = QDoubleSpinBox()
+        self._binder_search_cutoff.setRange(1.0, 10.0)
+        self._binder_search_cutoff.setValue(4.0)
+        self._binder_search_cutoff.setSingleStep(0.5)
+        self._binder_search_cutoff.setSuffix(" Å")
+        self._binder_search_cutoff.setToolTip("Distance cutoff for contact detection")
+        cutoff_layout.addWidget(self._binder_search_cutoff)
+
+        self._btn_search_binders = QPushButton("Search")
+        self._btn_search_binders.setToolTip("Find binders contacting these residues")
+        self._btn_search_binders.clicked.connect(self._on_search_binders)
+        cutoff_layout.addWidget(self._btn_search_binders)
+
+        layout.addLayout(cutoff_layout)
+
+        # Results list
+        self._binder_results_label = QLabel("No search performed")
+        self._binder_results_label.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self._binder_results_label)
+
+        self._binder_results_list = QListWidget()
+        self._binder_results_list.setMaximumHeight(100)
+        self._binder_results_list.setToolTip("Double-click to load structure")
+        self._binder_results_list.itemDoubleClicked.connect(self._on_binder_result_clicked)
+        self._binder_results_list.hide()
+        layout.addWidget(self._binder_results_list)
+
+        return group
+
+    def _on_search_binders(self) -> None:
+        """Handle search binders button click."""
+        text = self._binder_search_input.text().strip()
+        if not text:
+            self._binder_results_label.setText("Enter target residues")
+            self._binder_results_label.setStyleSheet("color: #c00; font-size: 11px;")
+            return
+
+        try:
+            residues = self._parse_residue_list(text)
+            cutoff = self._binder_search_cutoff.value()
+            self.binder_search_requested.emit(residues, cutoff)
+        except ValueError as e:
+            self._binder_results_label.setText(f"Invalid format: {e}")
+            self._binder_results_label.setStyleSheet("color: #c00; font-size: 11px;")
+
+    def _parse_residue_list(self, text: str) -> list[tuple[str, int]]:
+        """Parse residue specification string.
+
+        Args:
+            text: Residue specification (e.g., "A:45-50, A:72").
+
+        Returns:
+            List of (chain_id, residue_id) tuples.
+
+        Raises:
+            ValueError: If format is invalid.
+        """
+        residues = []
+        parts = [p.strip() for p in text.split(",")]
+
+        for part in parts:
+            if not part:
+                continue
+
+            if ":" not in part:
+                raise ValueError(f"Missing chain: {part}")
+
+            chain, rest = part.split(":", 1)
+            chain = chain.strip().upper()
+
+            if "-" in rest:
+                # Range: A:45-50
+                start_str, end_str = rest.split("-", 1)
+                start = int(start_str.strip())
+                end = int(end_str.strip())
+                for res_id in range(start, end + 1):
+                    residues.append((chain, res_id))
+            else:
+                # Single: A:45
+                res_id = int(rest.strip())
+                residues.append((chain, res_id))
+
+        return residues
+
+    def set_binder_search_results(
+        self, results: list[tuple[str, list[int]]]
+    ) -> None:
+        """Set binder search results.
+
+        Args:
+            results: List of (file_path, [contacting_residue_ids]) tuples.
+        """
+        self._binder_results_list.clear()
+
+        if not results:
+            self._binder_results_label.setText("No binders found")
+            self._binder_results_label.setStyleSheet("color: #666; font-size: 11px;")
+            self._binder_results_list.hide()
+            return
+
+        self._binder_results_label.setText(f"{len(results)} binder(s) found")
+        self._binder_results_label.setStyleSheet("color: #333; font-size: 11px;")
+
+        from pathlib import Path
+        for file_path, contacts in results:
+            name = Path(file_path).name
+            item = QListWidgetItem(f"{name} ({len(contacts)} contacts)")
+            item.setData(Qt.ItemDataRole.UserRole, file_path)
+            item.setToolTip(f"Contacting residues: {contacts[:10]}{'...' if len(contacts) > 10 else ''}")
+            self._binder_results_list.addItem(item)
+
+        self._binder_results_list.show()
+
+    def _on_binder_result_clicked(self, item: QListWidgetItem) -> None:
+        """Handle double-click on binder search result."""
+        file_path = item.data(Qt.ItemDataRole.UserRole)
+        if file_path:
+            self.binder_result_selected.emit(file_path)
+
     def _create_export_group(self) -> QGroupBox:
         """Create the selection export group."""
         group = QGroupBox("Export Selection")
@@ -467,6 +639,106 @@ class SelectionPanel(QWidget):
         layout.addWidget(self._metric_info_label)
 
         return group
+
+    def _create_sequence_info_group(self) -> QGroupBox:
+        """Create the sequence information group."""
+        group = QGroupBox("Sequence Info")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(4)
+
+        self._sequence_length_label = QLabel("No structure loaded")
+        self._sequence_length_label.setWordWrap(True)
+        self._sequence_length_label.setStyleSheet("font-size: 11px;")
+        layout.addWidget(self._sequence_length_label)
+
+        return group
+
+    def _create_chain_group_group(self) -> QGroupBox:
+        """Create the chain-based group creation controls."""
+        group = QGroupBox("Create Group from Chain")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+
+        # Chain selection
+        chain_layout = QHBoxLayout()
+        chain_layout.setSpacing(4)
+
+        chain_label = QLabel("Chain:")
+        chain_label.setFixedWidth(45)
+        chain_layout.addWidget(chain_label)
+
+        self._group_chain_combo = QComboBox()
+        self._group_chain_combo.setToolTip(
+            "Select a chain to find all structures with the same sequence"
+        )
+        self._group_chain_combo.addItem("(Select)")
+        chain_layout.addWidget(self._group_chain_combo)
+
+        layout.addLayout(chain_layout)
+
+        # Group name input
+        name_layout = QHBoxLayout()
+        name_layout.setSpacing(4)
+
+        name_label = QLabel("Name:")
+        name_label.setFixedWidth(45)
+        name_layout.addWidget(name_label)
+
+        self._group_name_input = QLineEdit()
+        self._group_name_input.setPlaceholderText("Enter group name")
+        self._group_name_input.setToolTip("Name for the new group")
+        name_layout.addWidget(self._group_name_input)
+
+        layout.addLayout(name_layout)
+
+        # Create button
+        self._btn_create_chain_group = QPushButton("Find && Create Group")
+        self._btn_create_chain_group.setToolTip(
+            "Find all structures with matching chain sequence and create a named group"
+        )
+        self._btn_create_chain_group.clicked.connect(self._on_create_chain_group)
+        layout.addWidget(self._btn_create_chain_group)
+
+        # Info label
+        self._chain_group_info = QLabel("")
+        self._chain_group_info.setWordWrap(True)
+        self._chain_group_info.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self._chain_group_info)
+
+        return group
+
+    def _on_create_chain_group(self) -> None:
+        """Handle create chain group button click."""
+        chain_id = self._group_chain_combo.currentData()
+        group_name = self._group_name_input.text().strip()
+
+        if not chain_id:
+            self._chain_group_info.setText("Please select a chain")
+            self._chain_group_info.setStyleSheet("color: #c00; font-size: 11px;")
+            return
+
+        if not group_name:
+            # Auto-generate name based on chain
+            group_name = f"Chain {chain_id} Group"
+
+        self.create_group_from_chain_requested.emit(chain_id, group_name)
+
+    def set_chain_group_result(self, count: int, group_name: str) -> None:
+        """Update the chain group info label with result.
+
+        Args:
+            count: Number of structures found.
+            group_name: Name of the created group.
+        """
+        if count > 0:
+            self._chain_group_info.setText(
+                f"Created group '{group_name}' with {count} structures"
+            )
+            self._chain_group_info.setStyleSheet("color: #060; font-size: 11px;")
+            self._group_name_input.clear()
+        else:
+            self._chain_group_info.setText("No matching structures found")
+            self._chain_group_info.setStyleSheet("color: #c00; font-size: 11px;")
 
     def _create_legend_group(self) -> QGroupBox:
         """Create the color legend group."""
@@ -581,20 +853,32 @@ class SelectionPanel(QWidget):
             scheme_name: Name of the color scheme.
         """
         try:
-            scheme = get_color_scheme(scheme_name)
-            self._legend_widget.set_legend(scheme.get_legend())
+            if scheme_name == "chain" and self._chain_ids:
+                scheme = get_color_scheme(scheme_name, chain_ids=self._chain_ids)
+                self._legend_widget.set_legend(scheme.get_legend(self._chain_ids))
+            else:
+                scheme = get_color_scheme(scheme_name)
+                self._legend_widget.set_legend(scheme.get_legend())
         except ValueError:
             self._legend_widget.clear()
 
-    def set_chains(self, chains: list[str]) -> None:
+    def set_chains(
+        self,
+        chains: list[str],
+        chain_lengths: dict[str, int] | None = None,
+    ) -> None:
         """Set available chains for selection.
 
         Args:
             chains: List of chain IDs.
+            chain_lengths: Optional dict mapping chain IDs to residue counts.
         """
+        self._chain_ids = sorted(chains)
+        self._chain_lengths = chain_lengths or {}
+
         self._chain_combo.clear()
         self._chain_combo.addItem("(Select chain)")
-        for chain in sorted(chains):
+        for chain in self._chain_ids:
             self._chain_combo.addItem(chain)
 
         # Also update interface chain dropdowns
@@ -603,7 +887,7 @@ class SelectionPanel(QWidget):
         self._target_chain_combo.clear()
         self._target_chain_combo.addItem("(Select)")
 
-        for chain in sorted(chains):
+        for chain in self._chain_ids:
             self._binder_chain_combo.addItem(chain)
             self._target_chain_combo.addItem(chain)
 
@@ -611,6 +895,16 @@ class SelectionPanel(QWidget):
         if len(chains) == 2:
             self._binder_chain_combo.setCurrentText(chains[1] if len(chains) > 1 else chains[0])
             self._target_chain_combo.setCurrentText(chains[0])
+
+        # Update group chain combo
+        self._group_chain_combo.clear()
+        self._group_chain_combo.addItem("(Select)")
+        for chain in self._chain_ids:
+            length_str = f" ({self._chain_lengths.get(chain, '?')} res)" if chain in self._chain_lengths else ""
+            self._group_chain_combo.addItem(f"{chain}{length_str}", chain)
+
+        # Update sequence length display
+        self._update_sequence_length_label()
 
     def set_selection_count(self, count: int, total: int) -> None:
         """Update selection count display.
@@ -679,6 +973,17 @@ class SelectionPanel(QWidget):
         self._interface_label.setText("No interface calculated")
         self._btn_select_interface.setEnabled(False)
         self._btn_clear_interface.setEnabled(False)
+
+        # Clear chain group creation state
+        self._group_chain_combo.clear()
+        self._group_chain_combo.addItem("(Select)")
+        self._group_name_input.clear()
+        self._chain_group_info.setText("")
+
+        # Clear chain info
+        self._chain_ids = []
+        self._chain_lengths = {}
+        self._sequence_length_label.setText("No structure loaded")
 
     # Interface handler methods
 
@@ -790,3 +1095,34 @@ class SelectionPanel(QWidget):
             residue_ids: List of selected residue IDs.
         """
         self._selected_residue_ids = residue_ids.copy()
+
+    def _update_sequence_length_label(self) -> None:
+        """Update the sequence length display based on current chains."""
+        if not self._chain_ids:
+            self._sequence_length_label.setText("No structure loaded")
+            return
+
+        if not self._chain_lengths:
+            # Just show chain list without lengths
+            self._sequence_length_label.setText(f"Chains: {', '.join(self._chain_ids)}")
+            return
+
+        # Build display string: "Chain A: 150 | Chain B: 120 | Total: 270"
+        parts = []
+        total = 0
+        for chain_id in self._chain_ids:
+            length = self._chain_lengths.get(chain_id, 0)
+            parts.append(f"{chain_id}: {length}")
+            total += length
+
+        display = " | ".join(parts)
+        if len(self._chain_ids) > 1:
+            display += f" | Total: {total}"
+        else:
+            display = f"Chain {display}"
+
+        self._sequence_length_label.setText(display)
+
+    def get_chain_ids(self) -> list[str]:
+        """Get the current structure's chain IDs."""
+        return self._chain_ids.copy()

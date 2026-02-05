@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import pyqtSignal, QUrl
+from PyQt6.QtCore import pyqtSignal, pyqtSlot, QObject, QUrl
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtWidgets import QVBoxLayout, QWidget, QLabel, QMessageBox
@@ -32,16 +32,25 @@ VIEWER_HTML = """
     <style>
         * { margin: 0; padding: 0; }
         html, body { width: 100%; height: 100%; overflow: hidden; }
-        #viewer { width: 100%; height: 100%; position: absolute; }
+        #viewer { width: 100%; height: 100%; position: absolute; cursor: crosshair; }
         .selection-highlight {
             stroke: #ffff00;
             stroke-width: 2px;
         }
     </style>
     <script src="https://3Dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 </head>
 <body>
     <div id="viewer"></div>
+    <script>
+        // Initialize QWebChannel bridge to Python
+        var pyBridge = null;
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            pyBridge = channel.objects.pyBridge;
+            window.pyBridge = pyBridge;
+        });
+    </script>
     <script>
         let viewer = null;
         // Store selected residues as array of {chain, resi} objects
@@ -76,12 +85,59 @@ VIEWER_HTML = """
             viewer.render();
         }
 
+        let hoveredResidue = null;
+
         function loadStructure(pdbData, format) {
             if (!viewer) initViewer();
             viewer.clear();
             selectedResidues = [];
             metricColorMap = {};
+            hoveredResidue = null;
             viewer.addModel(pdbData, format);
+
+            // Re-register click handler after loading new model
+            // (setClickable must be called after atoms exist)
+            viewer.setClickable({}, true, function(atom, viewer, event, container) {
+                if (atom) {
+                    handleAtomClick(atom, event.ctrlKey || event.metaKey);
+                }
+            });
+
+            // Add hover effect to make selection easier - highlights entire residue on hover
+            viewer.setHoverable({}, true,
+                function(atom, viewer, event, container) {
+                    // Mouse enter - highlight the hovered residue
+                    if (atom && (hoveredResidue === null ||
+                        hoveredResidue.chain !== atom.chain ||
+                        hoveredResidue.resi !== atom.resi)) {
+
+                        // Clear previous hover highlight
+                        if (hoveredResidue) {
+                            applyCurrentStyle();
+                        }
+
+                        hoveredResidue = {chain: atom.chain, resi: atom.resi};
+
+                        // Add hover highlight (cyan) unless already selected
+                        if (!isSelected(atom.chain, atom.resi)) {
+                            viewer.addStyle({chain: atom.chain, resi: atom.resi}, {
+                                cartoon: {color: '#00ffff', opacity: 0.9},
+                                stick: {color: '#00ffff', radius: 0.25}
+                            });
+                        }
+                        viewer.render();
+                    }
+                },
+                function(atom, viewer, event, container) {
+                    // Mouse leave - remove hover highlight
+                    if (hoveredResidue) {
+                        hoveredResidue = null;
+                        applyCurrentStyle();
+                        viewer.render();
+                    }
+                }
+            );
+
             applyCurrentStyle();
             viewer.zoomTo();
             viewer.render();
@@ -92,6 +148,13 @@ VIEWER_HTML = """
                 viewer.clear();
                 selectedResidues = [];
                 metricColorMap = {};
+                viewer.render();
+            }
+        }
+
+        function setBackgroundColor(color) {
+            if (viewer) {
+                viewer.setBackgroundColor(color);
                 viewer.render();
             }
         }
@@ -380,6 +443,21 @@ VIEWER_HTML = """
 """.replace('BACKGROUND_COLOR', DEFAULT_BACKGROUND_COLOR)
 
 
+class SelectionBridge(QObject):
+    """Bridge object for receiving selection changes from JavaScript."""
+
+    selection_changed = pyqtSignal(str)  # JSON string of selected residues
+
+    @pyqtSlot(str)
+    def onSelectionChanged(self, residues_json: str):
+        """Called from JavaScript when selection changes.
+
+        Args:
+            residues_json: JSON string of selected residues [{chain, resi}, ...].
+        """
+        self.selection_changed.emit(residues_json)
+
+
 class ProteinViewer(QWidget):
     """Widget for displaying 3D protein structures using py3Dmol.
 
@@ -427,6 +505,14 @@ class ProteinViewer(QWidget):
 
         # WebEngine view for 3Dmol
         self._web_view = QWebEngineView()
+
+        # Set up QWebChannel bridge for JavaScript → Python communication
+        self._selection_bridge = SelectionBridge()
+        self._selection_bridge.selection_changed.connect(self._on_3d_selection_changed)
+        self._web_channel = QWebChannel()
+        self._web_channel.registerObject("pyBridge", self._selection_bridge)
+        self._web_view.page().setWebChannel(self._web_channel)
+
         self._web_view.setHtml(VIEWER_HTML)
         layout.addWidget(self._web_view, 1)  # Stretch factor 1 to fill space
 
@@ -475,6 +561,14 @@ class ProteinViewer(QWidget):
         self._selected_residues = []  # List of {chain, id} dicts
         self._interface_residues = []  # List of {chain, id} dicts
         self._sequence_viewer.clear()
+
+    def set_background_color(self, color: str) -> None:
+        """Set the 3D viewer background color.
+
+        Args:
+            color: CSS color string (e.g., 'white', '#1e1e1e').
+        """
+        self._web_view.page().runJavaScript(f"setBackgroundColor('{color}');")
 
     def set_style(self, style: str) -> None:
         """Set the visualization style.
@@ -691,6 +785,26 @@ class ProteinViewer(QWidget):
         """
         # Update 3D viewer selection
         self.select_residues(selection, add_to_selection=False)
+
+    def _on_3d_selection_changed(self, residues_json: str) -> None:
+        """Handle selection change from 3D viewer (via JavaScript bridge).
+
+        Args:
+            residues_json: JSON string of selected residues [{chain, resi}, ...].
+        """
+        try:
+            residues = json.loads(residues_json)
+            # Convert JavaScript format {chain, resi} to Python format {chain, id}
+            self._selected_residues = [
+                {"chain": r["chain"], "id": r["resi"]}
+                for r in residues
+            ]
+            # Sync selection to sequence viewer
+            self._sequence_viewer.set_selection(self._selected_residues)
+            # Emit signal to notify other components
+            self.selection_changed.emit(self._selected_residues)
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Error parsing 3D selection: {e}")
 
     def sync_selection_to_sequence(self) -> None:
         """Sync the current 3D selection to the sequence viewer."""

@@ -396,6 +396,83 @@ class MetricsStore:
 
         return count
 
+    def load_single_protein_json(self, file_path: str | Path, pdb_file_path: str | None = None) -> bool:
+        """Load metrics from a single-protein JSON file (e.g., Boltz/AF2 output).
+
+        This handles JSON files where metrics like pLDDT_score are at the root level,
+        rather than in a nested structure.
+
+        Expected fields (all optional):
+        - sequence_name or job_id: Used as protein name if no pdb_file_path provided
+        - pLDDT_score: Overall pLDDT score
+        - confidence_score: Overall confidence
+        - ptm, iptm: PAE/contact scores
+
+        Args:
+            file_path: Path to JSON file.
+            pdb_file_path: Optional path to associated PDB file (used for name).
+
+        Returns:
+            True if successfully loaded, False if not a valid metrics file.
+        """
+        file_path = Path(file_path)
+        if not file_path.exists():
+            return False
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return False
+
+        # Must be a dict at root level
+        if not isinstance(data, dict):
+            return False
+
+        # Check for expected metrics fields
+        has_metrics = any(key in data for key in [
+            "pLDDT_score", "confidence_score", "ptm", "iptm",
+            "complex_plddt", "complex_pde"
+        ])
+        if not has_metrics:
+            return False
+
+        # Determine protein name
+        if pdb_file_path:
+            name = Path(pdb_file_path).stem
+        else:
+            name = data.get("sequence_name") or data.get("job_id") or file_path.stem
+
+        # Extract metrics
+        metrics = {}
+        metric_keys = [
+            ("pLDDT_score", "plddt"),
+            ("confidence_score", "confidence"),
+            ("ptm", "ptm"),
+            ("iptm", "iptm"),
+            ("complex_plddt", "complex_plddt"),
+            ("complex_pde", "complex_pde"),
+            ("complex_ipde", "complex_ipde"),
+            ("complex_iplddt", "complex_iplddt"),
+            ("ligand_iptm", "ligand_iptm"),
+            ("protein_iptm", "protein_iptm"),
+        ]
+
+        for json_key, metric_name in metric_keys:
+            if json_key in data and isinstance(data[json_key], (int, float)):
+                metrics[metric_name] = float(data[json_key])
+
+        if not metrics:
+            return False
+
+        protein = ProteinMetrics(
+            name=name,
+            file_path=pdb_file_path,
+            metrics=metrics,
+        )
+        self.add_protein(protein)
+        return True
+
     def save_csv(self, file_path: str | Path) -> None:
         """Save metrics to a CSV file.
 

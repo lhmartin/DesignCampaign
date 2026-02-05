@@ -94,10 +94,32 @@ class ChainScheme(ColorScheme):
     name = "chain"
     description = "Color by chain"
 
+    def __init__(self, chain_ids: list[str] | None = None):
+        """Initialize chain color scheme.
+
+        Args:
+            chain_ids: Optional list of actual chain IDs for legend.
+        """
+        self._chain_ids = chain_ids
+
     def get_3dmol_style(self, metadata: dict[str, Any] | None = None) -> str:
         return "{cartoon: {colorscheme: 'chain'}}"
 
-    def get_legend(self) -> list[ColorLegendItem]:
+    def get_legend(self, chain_ids: list[str] | None = None) -> list[ColorLegendItem]:
+        """Get the color legend for this scheme.
+
+        Args:
+            chain_ids: Optional list of chain IDs to display.
+
+        Returns:
+            List of legend items with labels and colors.
+        """
+        chains = chain_ids or self._chain_ids
+        if chains:
+            return [
+                ColorLegendItem(f"Chain {cid}", CHAIN_COLORS[i % len(CHAIN_COLORS)])
+                for i, cid in enumerate(chains)
+            ]
         return [
             ColorLegendItem(f"Chain {i+1}", color)
             for i, color in enumerate(CHAIN_COLORS[:6])
@@ -352,11 +374,12 @@ COLOR_SCHEMES: dict[str, type[ColorScheme]] = {
 }
 
 
-def get_color_scheme(name: str) -> ColorScheme:
+def get_color_scheme(name: str, chain_ids: list[str] | None = None) -> ColorScheme:
     """Get a color scheme instance by name.
 
     Args:
         name: Color scheme name.
+        chain_ids: Optional chain IDs for chain scheme legend.
 
     Returns:
         ColorScheme instance.
@@ -366,7 +389,11 @@ def get_color_scheme(name: str) -> ColorScheme:
     """
     if name not in COLOR_SCHEMES:
         raise ValueError(f"Unknown color scheme: {name}. Available: {list(COLOR_SCHEMES.keys())}")
-    return COLOR_SCHEMES[name]()
+
+    scheme_class = COLOR_SCHEMES[name]
+    if name == "chain" and chain_ids:
+        return scheme_class(chain_ids=chain_ids)
+    return scheme_class()
 
 
 def get_available_schemes() -> list[str]:
