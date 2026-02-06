@@ -55,3 +55,5 @@ Thumbs.db
 *.cif
 !examples/sample_proteins/*.pdb
 !examples/sample_proteins/*.cif
+*.seqhash.json
+examples/*.json

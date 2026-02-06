@@ -2,9 +2,12 @@
 
 import csv
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -328,6 +331,7 @@ class MetricsStore:
                 self.add_protein(protein)
                 count += 1
 
+        logger.info(f"Loaded {count} proteins from CSV: {file_path}")
         return count
 
     def load_json(self, file_path: str | Path) -> int:
@@ -394,7 +398,222 @@ class MetricsStore:
             self.add_protein(protein)
             count += 1
 
+        logger.info(f"Loaded {count} proteins from JSON: {file_path}")
         return count
+
+    def load_single_protein_json(
+        self,
+        file_path: str | Path,
+        pdb_file_path: str | None = None,
+        num_residues: int | None = None,
+    ) -> bool:
+        """Load metrics from a single-protein JSON file by scanning for all numeric values.
+
+        Generically scans the JSON file to find:
+        - Scalar int/float values -> treated as global metrics
+        - Lists of numbers -> if length matches num_residues, treated as per-residue
+          metrics (stored as mean/min/max); otherwise stored as list length info
+
+        Args:
+            file_path: Path to JSON file.
+            pdb_file_path: Optional path to associated PDB file (used for name).
+            num_residues: Optional expected residue count for per-residue detection.
+
+        Returns:
+            True if successfully loaded, False if not a valid metrics file.
+        """
+        file_path = Path(file_path)
+        if not file_path.exists():
+            return False
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return False
+
+        # Must be a dict at root level
+        if not isinstance(data, dict):
+            return False
+
+        # Determine protein name from known keys or filename
+        if pdb_file_path:
+            name = Path(pdb_file_path).stem
+        else:
+            name = (
+                data.get("sequence_name")
+                or data.get("job_id")
+                or data.get("name")
+                or file_path.stem
+            )
+            if not isinstance(name, str):
+                name = file_path.stem
+
+        # Recursively scan for all numeric values
+        metrics: dict[str, float] = {}
+        self._scan_json_for_metrics(data, "", metrics, num_residues)
+
+        if not metrics:
+            logger.debug(f"No numeric metrics found in {file_path}")
+            return False
+
+        logger.info(f"Loaded {len(metrics)} metrics from {file_path.name}: {list(metrics.keys())}")
+
+        protein = ProteinMetrics(
+            name=name,
+            file_path=pdb_file_path,
+            metrics=metrics,
+        )
+        self.add_protein(protein)
+        return True
+
+    def _scan_json_for_metrics(
+        self,
+        obj: Any,
+        prefix: str,
+        metrics: dict[str, float],
+        num_residues: int | None = None,
+        max_depth: int = 4,
+    ) -> None:
+        """Recursively scan a JSON object for numeric values.
+
+        Args:
+            obj: JSON object (dict, list, or scalar).
+            prefix: Key prefix for nested values (e.g., "scores.plddt").
+            metrics: Output dict to populate with metric_name -> value.
+            num_residues: Expected residue count for per-residue detection.
+            max_depth: Maximum nesting depth to prevent deep recursion.
+        """
+        if max_depth <= 0:
+            return
+
+        # Skip known non-metric keys
+        _skip_keys = {"name", "sequence_name", "job_id", "file_path", "version", "date"}
+
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if key in _skip_keys:
+                    continue
+                # Build a readable metric name
+                metric_key = f"{prefix}.{key}" if prefix else key
+                self._scan_json_for_metrics(
+                    value, metric_key, metrics, num_residues, max_depth - 1
+                )
+
+        elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+            # Scalar numeric value -> global metric
+            metrics[prefix] = float(obj)
+
+        elif isinstance(obj, list) and len(obj) > 0:
+            # Check if list is all numeric
+            if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in obj):
+                float_vals = [float(v) for v in obj]
+                # Determine if per-residue or some other array
+                is_per_residue = (
+                    num_residues is not None
+                    and len(float_vals) == num_residues
+                )
+                label = prefix
+                if is_per_residue:
+                    label = f"{prefix}(per_res)"
+                # Store summary statistics for numeric arrays
+                metrics[f"{label}_mean"] = sum(float_vals) / len(float_vals)
+                metrics[f"{label}_min"] = min(float_vals)
+                metrics[f"{label}_max"] = max(float_vals)
+
+            # Check if list is all dicts (e.g. complex_pae_scores chain-pair metrics)
+            elif all(isinstance(v, dict) for v in obj):
+                self._scan_dict_list_for_metrics(
+                    obj, prefix, metrics, num_residues, max_depth - 1
+                )
+
+    # Known keys used to label entries in a list of dicts (chain pairs, etc.)
+    _LABEL_KEY_PAIRS = [("chain1", "chain2"), ("chain_1", "chain_2")]
+    _LABEL_SINGLE_KEYS = ["chain", "name", "label", "id", "type"]
+
+    def _scan_dict_list_for_metrics(
+        self,
+        items: list[dict],
+        prefix: str,
+        metrics: dict[str, float],
+        num_residues: int | None = None,
+        max_depth: int = 3,
+    ) -> None:
+        """Extract metrics from a list of dicts (e.g. chain-pair scores).
+
+        For each dict, creates labeled metrics using chain pair identifiers
+        or list index as a suffix. Also computes aggregate stats (max) for
+        each numeric field across all entries.
+
+        Args:
+            items: List of dict objects.
+            prefix: Key prefix for metric names.
+            metrics: Output dict to populate.
+            num_residues: Expected residue count for per-residue detection.
+            max_depth: Maximum remaining nesting depth.
+        """
+        if max_depth <= 0 or not items:
+            return
+
+        # Collect per-field numeric values for aggregation
+        field_values: dict[str, list[float]] = {}
+
+        for idx, item in enumerate(items):
+            # Determine a label for this entry
+            label = self._get_dict_label(item, idx)
+            item_prefix = f"{prefix}.{label}" if prefix else label
+
+            for key, value in item.items():
+                # Skip the label keys themselves
+                if key in ("chain1", "chain2", "chain_1", "chain_2",
+                           "chain", "name", "label", "id", "type"):
+                    continue
+
+                metric_key = f"{item_prefix}.{key}" if item_prefix else key
+
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    fval = float(value)
+                    metrics[metric_key] = fval
+                    # Track for aggregation
+                    field_values.setdefault(key, []).append(fval)
+                elif isinstance(value, dict):
+                    self._scan_json_for_metrics(
+                        value, metric_key, metrics, num_residues, max_depth - 1
+                    )
+
+        # Aggregate stats across all entries (useful for multi-chain complexes)
+        if len(items) > 1:
+            for field_name, values in field_values.items():
+                agg_prefix = f"{prefix}.{field_name}" if prefix else field_name
+                metrics[f"{agg_prefix}_max"] = max(values)
+                metrics[f"{agg_prefix}_min"] = min(values)
+                if len(values) > 0:
+                    metrics[f"{agg_prefix}_mean"] = sum(values) / len(values)
+
+    def _get_dict_label(self, item: dict, index: int) -> str:
+        """Get a human-readable label for a dict entry in a list.
+
+        Checks for chain pair keys (chain1/chain2) or single label keys,
+        falling back to the list index.
+
+        Args:
+            item: Dict to label.
+            index: Position in the list.
+
+        Returns:
+            Label string (e.g. "A_B", "chainA", or "0").
+        """
+        # Check chain-pair keys
+        for k1, k2 in self._LABEL_KEY_PAIRS:
+            if k1 in item and k2 in item:
+                return f"{item[k1]}_{item[k2]}"
+
+        # Check single label keys
+        for key in self._LABEL_SINGLE_KEYS:
+            if key in item and isinstance(item[key], str):
+                return item[key]
+
+        return str(index)
 
     def save_csv(self, file_path: str | Path) -> None:
         """Save metrics to a CSV file.

@@ -1,8 +1,11 @@
 """File handling utilities for protein structure files."""
 
+import logging
 from pathlib import Path
 
 from src.config.settings import SUPPORTED_FORMATS, MAX_FILE_SIZE_WARNING
+
+logger = logging.getLogger(__name__)
 
 
 def get_protein_files(directory: str | Path) -> list[Path]:
@@ -31,7 +34,40 @@ def get_protein_files(directory: str | Path) -> list[Path]:
         if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_FORMATS:
             protein_files.append(file_path)
 
-    return sorted(protein_files, key=lambda p: p.name.lower())
+    result = sorted(protein_files, key=lambda p: p.name.lower())
+    logger.info(f"Found {len(result)} protein files in {directory}")
+    return result
+
+
+def get_json_files(directory: str | Path) -> list[Path]:
+    """Scan a directory for JSON files that may contain metrics.
+
+    Args:
+        directory: Path to the directory to scan.
+
+    Returns:
+        List of Path objects for JSON files, sorted alphabetically.
+
+    Raises:
+        FileNotFoundError: If the directory does not exist.
+        NotADirectoryError: If the path is not a directory.
+    """
+    directory = Path(directory)
+
+    if not directory.exists():
+        raise FileNotFoundError(f"Directory not found: {directory}")
+
+    if not directory.is_dir():
+        raise NotADirectoryError(f"Path is not a directory: {directory}")
+
+    json_files = []
+    for file_path in directory.iterdir():
+        if file_path.is_file() and file_path.suffix.lower() == ".json":
+            json_files.append(file_path)
+
+    result = sorted(json_files, key=lambda p: p.name.lower())
+    logger.info(f"Found {len(result)} JSON files in {directory}")
+    return result
 
 
 def validate_file_path(file_path: str | Path) -> bool:

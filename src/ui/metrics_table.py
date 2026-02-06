@@ -264,9 +264,8 @@ class FilterWidget(QWidget):
         layout.addWidget(self._checkbox)
 
         # Metric name label
-        label = QLabel(f"{self._metric_name}:")
-        label.setFixedWidth(80)
-        layout.addWidget(label)
+        self._label = QLabel(f"{self._metric_name}:")
+        layout.addWidget(self._label)
 
         # Min value
         self._min_spin = QDoubleSpinBox()
@@ -329,6 +328,22 @@ class FilterWidget(QWidget):
         self._min_spin.setEnabled(False)
         self._max_spin.setEnabled(False)
 
+    def set_label_width(self, width: int) -> None:
+        """Set the label width for alignment.
+
+        Args:
+            width: Width in pixels.
+        """
+        self._label.setFixedWidth(width)
+
+    def get_label_width_hint(self) -> int:
+        """Get the preferred width for the label based on text.
+
+        Returns:
+            Width in pixels needed to display the label text.
+        """
+        return self._label.fontMetrics().boundingRect(self._label.text()).width() + 10
+
 
 class MetricsTableWidget(QWidget):
     """Widget displaying protein metrics in a sortable, filterable table.
@@ -336,10 +351,12 @@ class MetricsTableWidget(QWidget):
     Signals:
         protein_selected: Emitted when a protein is selected (protein name).
         protein_double_clicked: Emitted when a protein is double-clicked.
+        filters_changed: Emitted when metric filters change (dict of metric_name -> (min, max)).
     """
 
     protein_selected = pyqtSignal(str)  # protein name
     protein_double_clicked = pyqtSignal(str)  # protein name
+    filters_changed = pyqtSignal(dict)  # {metric_name: (min_val, max_val), ...}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -357,19 +374,19 @@ class MetricsTableWidget(QWidget):
         filter_layout = QVBoxLayout(filter_group)
         filter_layout.setSpacing(4)
 
-        # Name filter
-        name_filter_layout = QHBoxLayout()
-        name_filter_layout.addWidget(QLabel("Name:"))
-        self._name_filter_input = QLineEdit()
-        self._name_filter_input.setPlaceholderText("Filter by protein name...")
-        self._name_filter_input.textChanged.connect(self._on_name_filter_changed)
-        name_filter_layout.addWidget(self._name_filter_input)
+        # Metric filter search
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("Search:"))
+        self._filter_search_input = QLineEdit()
+        self._filter_search_input.setPlaceholderText("Search metrics...")
+        self._filter_search_input.textChanged.connect(self._on_filter_search_changed)
+        search_layout.addWidget(self._filter_search_input)
 
         self._clear_filters_btn = QPushButton("Clear Filters")
         self._clear_filters_btn.clicked.connect(self._on_clear_filters)
-        name_filter_layout.addWidget(self._clear_filters_btn)
+        search_layout.addWidget(self._clear_filters_btn)
 
-        filter_layout.addLayout(name_filter_layout)
+        filter_layout.addLayout(search_layout)
 
         # Metric filters container
         self._metric_filters_layout = QVBoxLayout()
@@ -444,6 +461,12 @@ class MetricsTableWidget(QWidget):
             self._filter_widgets[metric_name] = widget
             self._metric_filters_layout.addWidget(widget)
 
+        # Calculate max label width and apply to all widgets for alignment
+        if self._filter_widgets:
+            max_width = max(w.get_label_width_hint() for w in self._filter_widgets.values())
+            for widget in self._filter_widgets.values():
+                widget.set_label_width(max_width)
+
     def _update_status(self) -> None:
         """Update the status label."""
         visible = self._proxy_model.rowCount()
@@ -455,9 +478,13 @@ class MetricsTableWidget(QWidget):
         else:
             self._status_label.setText(f"Showing {visible} of {total} proteins")
 
-    def _on_name_filter_changed(self, text: str) -> None:
-        self._proxy_model.set_name_filter(text)
-        self._update_status()
+    def _on_filter_search_changed(self, text: str) -> None:
+        """Filter which metric filter widgets are visible based on search text."""
+        search_lower = text.lower()
+        for metric_name, widget in self._filter_widgets.items():
+            # Show widget if search is empty or metric name contains search text
+            visible = not search_lower or search_lower in metric_name.lower()
+            widget.setVisible(visible)
 
     def _on_metric_filter_changed(
         self,
@@ -467,13 +494,20 @@ class MetricsTableWidget(QWidget):
     ) -> None:
         self._proxy_model.set_metric_filter(metric_name, min_val, max_val)
         self._update_status()
+        self._emit_filters()
 
     def _on_clear_filters(self) -> None:
-        self._name_filter_input.clear()
+        self._filter_search_input.clear()
         for widget in self._filter_widgets.values():
             widget.reset()
+            widget.setVisible(True)  # Show all widgets when clearing
         self._proxy_model.clear_filters()
         self._update_status()
+        self._emit_filters()
+
+    def _emit_filters(self) -> None:
+        """Emit the current filter state."""
+        self.filters_changed.emit(self._proxy_model._metric_filters.copy())
 
     def _on_selection_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
         if not current.isValid():
@@ -506,6 +540,21 @@ class MetricsTableWidget(QWidget):
         source_index = self._proxy_model.mapToSource(indexes[0])
         protein = self._model.get_protein_at_row(source_index.row())
         return protein.name if protein else None
+
+    def get_filtered_protein_names(self) -> list[str]:
+        """Get names of all proteins currently passing filters.
+
+        Returns:
+            List of protein names visible in the filtered table.
+        """
+        names = []
+        for row in range(self._proxy_model.rowCount()):
+            index = self._proxy_model.index(row, 0)
+            source_index = self._proxy_model.mapToSource(index)
+            protein = self._model.get_protein_at_row(source_index.row())
+            if protein:
+                names.append(protein.name)
+        return names
 
     def select_protein(self, name: str) -> bool:
         """Select a protein by name.

@@ -17,6 +17,7 @@ from src.config.color_schemes import (
     COLOR_SCHEMES,
     CHAIN_COLORS,
     HYDROPHOBICITY_SCALE,
+    SECONDARY_STRUCTURE_COLORS,
 )
 
 
@@ -100,13 +101,28 @@ class TestSecondaryStructureScheme:
         assert "ssJmol" in style
 
     def test_get_legend(self):
-        """Test legend generation."""
+        """Test legend generation with ssJmol colors."""
         scheme = SecondaryStructureScheme()
         legend = scheme.get_legend()
         labels = [item.label for item in legend]
-        assert "Helix" in labels
-        assert "Sheet" in labels
+        assert "Helix (\u03b1)" in labels
+        assert "Sheet (\u03b2)" in labels
         assert "Coil" in labels
+
+    def test_legend_colors_match_constants(self):
+        """Test that legend colors match SECONDARY_STRUCTURE_COLORS."""
+        scheme = SecondaryStructureScheme()
+        legend = scheme.get_legend()
+        color_map = {item.label: item.color for item in legend}
+        assert color_map["Helix (\u03b1)"] == SECONDARY_STRUCTURE_COLORS["helix"]
+        assert color_map["Sheet (\u03b2)"] == SECONDARY_STRUCTURE_COLORS["sheet"]
+        assert color_map["Coil"] == SECONDARY_STRUCTURE_COLORS["coil"]
+
+    def test_ssjmol_colors(self):
+        """Test that ssJmol colors are correct hex values."""
+        assert SECONDARY_STRUCTURE_COLORS["helix"] == "#ff0080"
+        assert SECONDARY_STRUCTURE_COLORS["sheet"] == "#ffc800"
+        assert SECONDARY_STRUCTURE_COLORS["coil"] == "#ffffff"
 
 
 class TestBFactorScheme:

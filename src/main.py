@@ -4,6 +4,22 @@ import logging
 import os
 import sys
 
+# WSL2's Wayland compositor (WSLg) has a Qt6 bug where layout changes
+# (e.g. tab switching) can produce a buffer 1px off from the maximized
+# size, causing a fatal Wayland protocol error. Use XCB if its
+# dependencies are available, otherwise stay on Wayland.
+try:
+    import ctypes.util
+
+    if (
+        "microsoft" in os.uname().release.lower()
+        and "QT_QPA_PLATFORM" not in os.environ
+        and ctypes.util.find_library("xcb-cursor")
+    ):
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+except Exception:
+    pass
+
 # Configure QtWebEngine for WSL2/Wayland compatibility
 # Use software WebGL rendering to avoid Vulkan issues while keeping WebGL working
 # Must be set before importing Qt
