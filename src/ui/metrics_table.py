@@ -541,6 +541,21 @@ class MetricsTableWidget(QWidget):
         protein = self._model.get_protein_at_row(source_index.row())
         return protein.name if protein else None
 
+    def get_filtered_protein_names(self) -> list[str]:
+        """Get names of all proteins currently passing filters.
+
+        Returns:
+            List of protein names visible in the filtered table.
+        """
+        names = []
+        for row in range(self._proxy_model.rowCount()):
+            index = self._proxy_model.index(row, 0)
+            source_index = self._proxy_model.mapToSource(index)
+            protein = self._model.get_protein_at_row(source_index.row())
+            if protein:
+                names.append(protein.name)
+        return names
+
     def select_protein(self, name: str) -> bool:
         """Select a protein by name.
 

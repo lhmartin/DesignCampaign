@@ -10,6 +10,7 @@ dependencies = [
     "pyqt6-webengine>=6.6.0",
     "biotite>=1.0.0",
     "numpy>=1.24.0",
+    "pyqtgraph>=0.13.0",
 ]
 
 [project.optional-dependencies]

@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -644,36 +644,70 @@ class GroupingManager:
         self,
         target_residues: list[tuple[str, int]],
         distance_cutoff: float = 4.0,
-    ) -> list[tuple[str, list[int]]]:
+        file_paths: list[str] | None = None,
+        min_target_contacts: int = 1,
+    ) -> list[tuple[str, list[int], int]]:
         """Find binders that contact specific target residues.
 
         Uses KD-tree for efficient O(n log n) spatial queries instead of
         O(n*m) nested loops.
 
+        If a structure has an explicit target/binder designation, that is used.
+        Otherwise, chains mentioned in target_residues are treated as target
+        chains and all other chains as potential binder chains.
+
         Args:
             target_residues: List of (chain_id, residue_id) tuples for target residues.
             distance_cutoff: Maximum distance (Angstroms) for contact.
+            file_paths: Optional list of file paths to search. If None, searches
+                all registered proteins.
+            min_target_contacts: Minimum number of distinct target residues that
+                must be contacted for a binder to be included in results.
 
         Returns:
-            List of (file_path, [contacting_binder_residue_ids]) tuples,
-            sorted by number of contacts (descending).
+            List of (file_path, [contacting_binder_residue_ids], target_residues_contacted)
+            tuples, sorted by target residues contacted (descending), then by
+            binder contact count.
         """
         if not target_residues:
             return []
 
-        results: list[tuple[str, list[int]]] = []
+        # Determine which chains the user specified as target
+        specified_target_chains = set(chain_id for chain_id, _ in target_residues)
 
-        for file_path, designation in self._designations.items():
+        # Determine which files to search
+        search_paths = file_paths if file_paths is not None else list(self._proteins.keys())
+
+        results: list[tuple[str, list[int], int]] = []
+
+        for file_path in search_paths:
             if file_path not in self._proteins:
                 continue
 
             protein = self._proteins[file_path]
             structure = protein.structure
 
-            # Build list of target atom coordinates
-            target_coords_list = []
+            # Determine target/binder chains for this structure
+            designation = self._designations.get(file_path)
+            if designation:
+                target_chains = set(designation.target_chains)
+                binder_chains = set(designation.binder_chains)
+            else:
+                # Infer from the specified residues: chains in the query are
+                # target, all other chains in the structure are binders
+                all_chains = set(structure.chain_id)
+                target_chains = specified_target_chains & all_chains
+                binder_chains = all_chains - target_chains
+
+            if not binder_chains:
+                continue
+
+            # Build per-target-residue coordinate arrays for tracking
+            # which target residues are individually contacted
+            per_target: list[tuple[tuple[str, int], np.ndarray]] = []
+            all_target_coords_list = []
             for chain_id, res_id in target_residues:
-                if chain_id not in designation.target_chains:
+                if chain_id not in target_chains:
                     continue
 
                 mask = (
@@ -682,41 +716,53 @@ class GroupingManager:
                 )
                 atoms = structure[mask]
                 if len(atoms) > 0:
-                    target_coords_list.append(atoms.coord)
+                    coords = atoms.coord
+                    per_target.append(((chain_id, res_id), coords))
+                    all_target_coords_list.append(coords)
 
-            if not target_coords_list:
+            if not all_target_coords_list:
                 continue
 
-            # Combine all target coordinates
-            target_coords = np.vstack(target_coords_list)
-
             # Get binder atoms
-            binder_mask = np.isin(structure.chain_id, designation.binder_chains)
+            binder_mask = np.isin(structure.chain_id, list(binder_chains))
             binder_atoms = structure[binder_mask]
 
             if len(binder_atoms) == 0:
                 continue
 
             binder_coords = binder_atoms.coord
-
-            # Use KD-tree for efficient spatial query
-            target_tree = cKDTree(target_coords)
             binder_tree = cKDTree(binder_coords)
 
-            # Find all binder atoms within distance_cutoff of any target atom
-            pairs = binder_tree.query_ball_tree(target_tree, distance_cutoff)
+            # Check which target residues are contacted by any binder atom
+            contacted_target_residues = set()
+            for target_key, target_coords in per_target:
+                target_tree = cKDTree(target_coords)
+                pairs = binder_tree.query_ball_tree(target_tree, distance_cutoff)
+                if any(close for close in pairs):
+                    contacted_target_residues.add(target_key)
 
-            # Collect unique residue IDs that have contacts
+            if len(contacted_target_residues) < min_target_contacts:
+                continue
+
+            # Collect binder residues that have contacts (using combined targets)
+            all_target_coords = np.vstack(all_target_coords_list)
+            all_target_tree = cKDTree(all_target_coords)
+            pairs = binder_tree.query_ball_tree(all_target_tree, distance_cutoff)
+
             contacting_residues = set()
             for binder_idx, close_indices in enumerate(pairs):
-                if close_indices:  # Has at least one contact with target
+                if close_indices:
                     contacting_residues.add(int(binder_atoms[binder_idx].res_id))
 
             if contacting_residues:
-                results.append((file_path, sorted(contacting_residues)))
+                results.append((
+                    file_path,
+                    sorted(contacting_residues),
+                    len(contacted_target_residues),
+                ))
 
-        # Sort by number of contacts (descending)
-        results.sort(key=lambda x: len(x[1]), reverse=True)
+        # Sort by target residues contacted (desc), then binder contacts (desc)
+        results.sort(key=lambda x: (x[2], len(x[1])), reverse=True)
         return results
 
     def get_sequence_groups(self) -> list[StructureGroup]:
@@ -868,6 +914,106 @@ class GroupingManager:
             if group.remove_member(path):
                 removed += 1
         return removed
+
+    def auto_detect_targets(
+        self,
+        proteins: list[tuple[str, "Protein"]] | None = None,
+        min_frequency: float = 0.5,
+    ) -> dict[str, TargetDesignation]:
+        """Auto-detect target chains by finding shared chain sequences.
+
+        Heuristic: chains whose sequence appears in many structures are targets,
+        chains unique to a single structure are binders.
+
+        Args:
+            proteins: Optional list of (file_path, Protein) tuples. If None, uses registered proteins.
+            min_frequency: Minimum fraction of structures a chain must appear in to be considered target (0-1).
+
+        Returns:
+            Dict of file_path -> TargetDesignation for detected targets.
+        """
+        # Build protein list
+        if proteins is not None:
+            for file_path, protein in proteins:
+                self._proteins[file_path] = protein
+            protein_items = proteins
+        else:
+            protein_items = list(self._proteins.items())
+
+        if len(protein_items) < 2:
+            logger.debug("auto_detect_targets: need at least 2 structures")
+            return {}
+
+        # Step 1: Compute per-chain sequence hashes for every structure
+        # chain_seq_hash -> list of (file_path, chain_id)
+        chain_occurrences: dict[str, list[tuple[str, str]]] = {}
+        structure_chains: dict[str, dict[str, str]] = {}  # file_path -> {chain_id -> seq_hash}
+
+        for file_path, protein in protein_items:
+            sequence = protein.get_sequence()
+            chains_map: dict[str, str] = {}
+
+            for chain_id in protein.get_chains():
+                chain_seq = "".join(
+                    r["one_letter"] for r in sequence if r["chain"] == chain_id
+                )
+                if not chain_seq:
+                    continue
+                seq_hash = hashlib.md5(chain_seq.encode()).hexdigest()[:12]
+                chains_map[chain_id] = seq_hash
+
+                if seq_hash not in chain_occurrences:
+                    chain_occurrences[seq_hash] = []
+                chain_occurrences[seq_hash].append((file_path, chain_id))
+
+            structure_chains[file_path] = chains_map
+
+        total_structures = len(protein_items)
+        threshold = max(2, int(total_structures * min_frequency))
+
+        # Step 2: Find chain sequences that appear across many structures
+        target_hashes = set()
+        for seq_hash, occurrences in chain_occurrences.items():
+            unique_structures = len(set(fp for fp, _ in occurrences))
+            if unique_structures >= threshold:
+                target_hashes.add(seq_hash)
+
+        if not target_hashes:
+            logger.debug(
+                f"auto_detect_targets: no chain sequence found in >= {threshold} of {total_structures} structures"
+            )
+            return {}
+
+        logger.info(
+            f"auto_detect_targets: found {len(target_hashes)} target chain sequence(s) "
+            f"(threshold: {threshold}/{total_structures})"
+        )
+
+        # Step 3: Create designations for each structure
+        designations: dict[str, TargetDesignation] = {}
+        for file_path, chains_map in structure_chains.items():
+            target_chains = []
+            binder_chains = []
+            for chain_id, seq_hash in chains_map.items():
+                if seq_hash in target_hashes:
+                    target_chains.append(chain_id)
+                else:
+                    binder_chains.append(chain_id)
+
+            if target_chains and binder_chains:
+                designation = TargetDesignation(
+                    file_path=file_path,
+                    target_chains=sorted(target_chains),
+                    binder_chains=sorted(binder_chains),
+                )
+                designations[file_path] = designation
+                self._designations[file_path] = designation
+
+        logger.info(
+            f"auto_detect_targets: created {len(designations)} designations "
+            f"({len(target_hashes)} target sequences, {total_structures} structures)"
+        )
+        return designations
 
     def create_group_from_chain_search(
         self,

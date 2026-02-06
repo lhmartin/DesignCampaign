@@ -7,6 +7,7 @@ from typing import Any
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
+    QApplication,
     QMainWindow,
     QSplitter,
     QWidget,
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QTabWidget,
     QMessageBox,
+    QSizePolicy,
 )
 
 from src.config.settings import (
@@ -26,7 +28,7 @@ from src.config.settings import (
     LEFT_PANEL_RATIO,
 )
 from src.config.theme_manager import get_theme_manager
-from src.config.user_config import load_config, save_config, UserConfig, FilterConfig
+from src.config.user_config import load_config, save_config, UserConfig
 from src.utils.file_utils import get_json_files
 from src.ui.file_list import FileListWidget
 from src.ui.viewer import ProteinViewer
@@ -179,9 +181,17 @@ class MainWindow(QMainWindow):
 
         # Horizontal splitter for left (tabs), center (viewer), right (panel)
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setHandleWidth(8)
+        self._splitter.setOpaqueResize(False)
+        self._splitter.setChildrenCollapsible(False)
 
         # Left panel: Tabbed file list and metrics table
         self._left_tabs = QTabWidget()
+        # Prevent tab content size hints from affecting the window size,
+        # which can cause a fatal 1px buffer mismatch on Wayland when maximized.
+        self._left_tabs.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored
+        )
 
         # File list tab
         self._file_list = FileListWidget()
@@ -261,6 +271,18 @@ class MainWindow(QMainWindow):
         export_json_action.setStatusTip("Export metrics to a JSON file")
         export_json_action.triggered.connect(self._on_export_json)
         export_menu.addAction(export_json_action)
+
+        export_menu.addSeparator()
+
+        export_filtered_fasta_action = QAction("Filtered Sequences to &FASTA...", self)
+        export_filtered_fasta_action.setStatusTip("Export sequences of filtered proteins to FASTA")
+        export_filtered_fasta_action.triggered.connect(self._on_export_filtered_fasta)
+        export_menu.addAction(export_filtered_fasta_action)
+
+        export_filtered_csv_action = QAction("Filtered &Proteins to CSV...", self)
+        export_filtered_csv_action.setStatusTip("Export filtered protein names and metrics to CSV")
+        export_filtered_csv_action.triggered.connect(self._on_export_filtered_csv)
+        export_menu.addAction(export_filtered_csv_action)
 
         file_menu.addSeparator()
 
@@ -362,6 +384,13 @@ class MainWindow(QMainWindow):
         designate_action.triggered.connect(self._on_designate_target)
         view_menu.addAction(designate_action)
 
+        auto_target_action = QAction("&Auto-Detect Targets", self)
+        auto_target_action.setStatusTip(
+            "Auto-detect target chains by finding shared sequences across structures"
+        )
+        auto_target_action.triggered.connect(self._on_auto_detect_targets)
+        view_menu.addAction(auto_target_action)
+
         view_menu.addSeparator()
 
         # Dark mode toggle
@@ -417,6 +446,7 @@ class MainWindow(QMainWindow):
         self._file_list.grouping_mode_changed.connect(self._on_grouping_mode_changed)
         self._selection_panel.binder_search_requested.connect(self._on_binder_search_requested)
         self._selection_panel.binder_result_selected.connect(self._on_binder_result_selected)
+        self._selection_panel.binder_group_requested.connect(self._on_binder_group_requested)
         self._selection_panel.create_group_from_chain_requested.connect(
             self._on_create_group_from_chain
         )
@@ -488,11 +518,13 @@ class MainWindow(QMainWindow):
         Args:
             folder_path: Path to the new folder.
         """
+        logger.info(f"Folder changed to: {folder_path}")
         # Clear cached proteins from previous folder to free memory
         self._grouping_manager.clear()
 
         self._current_folder = folder_path
         count = self._file_list.file_count
+        logger.info(f"Loaded {count} protein file(s) from folder")
         self._statusbar.showMessage(f"Loaded {count} file(s) from {folder_path}")
 
         # Auto-load metrics from JSON files in the folder
@@ -513,7 +545,10 @@ class MainWindow(QMainWindow):
             return
 
         if not json_files:
+            logger.debug(f"No JSON files found in {folder_path}")
             return
+
+        logger.info(f"Auto-loading metrics: found {len(json_files)} JSON files in {folder_path}")
 
         # Build a map of protein stems to their file paths
         protein_stems = {}
@@ -530,6 +565,11 @@ class MainWindow(QMainWindow):
 
             if self._metrics_store.load_single_protein_json(str(json_file), pdb_file_path):
                 loaded_count += 1
+
+        logger.info(
+            f"Auto-load metrics: {loaded_count} of {len(json_files)} JSON files "
+            f"matched protein files ({len(protein_stems)} proteins in folder)"
+        )
 
         if loaded_count > 0:
             self._metrics_table.set_store(self._metrics_store)
@@ -596,9 +636,7 @@ class MainWindow(QMainWindow):
         if self._current_protein:
             total = self._current_protein.get_num_residues()
             self._selection_panel.set_selection_count(len(selection), total)
-            # Pass just the residue IDs to selection panel for now
-            residue_ids = [r["id"] for r in selection]
-            self._selection_panel.set_selected_residues(residue_ids)
+            self._selection_panel.set_selected_residues(selection)
 
         # Sync to sequence viewer
         self._viewer.sync_selection_to_sequence()
@@ -715,45 +753,31 @@ class MainWindow(QMainWindow):
         """
         self._statusbar.showMessage(f"Selected: {name}")
 
-    def _on_metrics_protein_double_clicked(self, name: str):
-        """Handle protein double-click in metrics table.
+    def _load_protein_by_name(self, name: str):
+        """Find and load a protein structure file by name.
 
-        Args:
-            name: Protein name.
+        Looks up the file path from the metrics store first, then falls back
+        to searching the current folder for matching .pdb/.cif files.
         """
-        # Try to find and load the protein file
         protein_data = self._metrics_store.get_protein(name)
         if protein_data and protein_data.file_path:
             self._load_protein(protein_data.file_path)
-        elif self._current_folder:
-            # Try to find in current folder
+            return
+        if self._current_folder:
             for ext in [".pdb", ".cif"]:
                 file_path = Path(self._current_folder) / f"{name}{ext}"
                 if file_path.exists():
                     self._load_protein(str(file_path))
                     return
-            self._statusbar.showMessage(f"Could not find structure file for {name}")
+        self._statusbar.showMessage(f"Could not find structure file for {name}")
+
+    def _on_metrics_protein_double_clicked(self, name: str):
+        """Handle protein double-click in metrics table."""
+        self._load_protein_by_name(name)
 
     def _on_plot_protein_selected(self, name: str):
-        """Handle protein selection from plot click.
-
-        Args:
-            name: Protein name.
-        """
-        # Try to find and load the protein file
-        protein_data = self._metrics_store.get_protein(name)
-        if protein_data and protein_data.file_path:
-            self._load_protein(protein_data.file_path)
-        elif self._current_folder:
-            # Try to find in current folder
-            for ext in [".pdb", ".cif"]:
-                file_path = Path(self._current_folder) / f"{name}{ext}"
-                if file_path.exists():
-                    self._load_protein(str(file_path))
-                    return
-            self._statusbar.showMessage(f"Could not find structure file for {name}")
-        else:
-            self._statusbar.showMessage(f"Selected: {name} (no structure file found)")
+        """Handle protein selection from plot click."""
+        self._load_protein_by_name(name)
 
     # Import/Export handlers
 
@@ -830,6 +854,113 @@ class MainWindow(QMainWindow):
                 self._statusbar.showMessage(f"Exported metrics to {file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export JSON: {e}")
+
+    def _on_export_filtered_fasta(self):
+        """Handle Export > Filtered Sequences to FASTA."""
+        filtered_names = self._metrics_table.get_filtered_protein_names()
+        if not filtered_names:
+            QMessageBox.warning(self, "Export", "No proteins pass the current filters")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Filtered Sequences to FASTA",
+            "",
+            "FASTA Files (*.fasta *.fa);;All Files (*)",
+        )
+        if not file_path:
+            return
+
+        exported = 0
+        try:
+            with open(file_path, "w") as f:
+                for name in filtered_names:
+                    # Try to find structure file
+                    protein_path = self._find_protein_file(name)
+                    if not protein_path:
+                        continue
+                    try:
+                        protein = Protein(protein_path)
+                        sequence = protein.get_sequence()
+                        if not sequence:
+                            continue
+                        # Group by chain
+                        chains: dict[str, list[str]] = {}
+                        for res in sequence:
+                            chain = res.get("chain", "")
+                            chains.setdefault(chain, []).append(res.get("one_letter", "X"))
+                        for chain_id, letters in chains.items():
+                            seq_str = "".join(letters)
+                            f.write(f">{name}|chain_{chain_id}\n")
+                            for i in range(0, len(seq_str), 60):
+                                f.write(f"{seq_str[i:i+60]}\n")
+                        exported += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to export {name}: {e}")
+            self._statusbar.showMessage(
+                f"Exported {exported} of {len(filtered_names)} filtered proteins to {file_path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export FASTA: {e}")
+
+    def _on_export_filtered_csv(self):
+        """Handle Export > Filtered Proteins to CSV."""
+        filtered_names = self._metrics_table.get_filtered_protein_names()
+        if not filtered_names:
+            QMessageBox.warning(self, "Export", "No proteins pass the current filters")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Filtered Proteins to CSV",
+            "",
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if not file_path:
+            return
+
+        try:
+            # Build filtered store and save
+            metric_names = self._metrics_store.metric_names
+            with open(file_path, "w") as f:
+                f.write("name," + ",".join(metric_names) + "\n")
+                for name in filtered_names:
+                    protein = self._metrics_store.get_protein(name)
+                    if not protein:
+                        continue
+                    values = [
+                        f"{protein.get_metric(m):.4f}" if protein.has_metric(m) else ""
+                        for m in metric_names
+                    ]
+                    f.write(f"{name},{','.join(values)}\n")
+            self._statusbar.showMessage(
+                f"Exported {len(filtered_names)} filtered proteins to {file_path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export CSV: {e}")
+
+    def _find_protein_file(self, name: str) -> str | None:
+        """Find a protein structure file by name.
+
+        Args:
+            name: Protein name (stem).
+
+        Returns:
+            File path or None if not found.
+        """
+        # Check metrics store for stored file path
+        protein_data = self._metrics_store.get_protein(name)
+        if protein_data and protein_data.file_path:
+            if Path(protein_data.file_path).exists():
+                return protein_data.file_path
+
+        # Search current folder
+        if self._current_folder:
+            for ext in [".pdb", ".cif"]:
+                path = Path(self._current_folder) / f"{name}{ext}"
+                if path.exists():
+                    return str(path)
+        return None
 
     def _on_batch_calculate(self, metric_name: str):
         """Handle batch metric calculation for all proteins in folder.
@@ -919,8 +1050,7 @@ class MainWindow(QMainWindow):
             name: Protein name.
             message: Error message.
         """
-        # Log error but continue with other proteins
-        pass
+        logger.warning(f"Batch metric calculation failed for '{name}': {message}")
 
     def _on_batch_finished(self):
         """Handle batch calculation completion."""
@@ -985,39 +1115,66 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage(f"Calculating interface ({binder_chain} vs {target_chains})...")
 
         try:
-            interface = self._current_protein.get_interface_residues(
+            # Calculate binder-side interface residues
+            binder_interface = self._current_protein.get_interface_residues(
                 binder_chain=binder_chain,
                 target_chains=target_chains,
                 distance_cutoff=cutoff,
             )
 
-            # Interface is dict mapping residue ID to amino acid
-            # Convert to list of dicts with chain info (interface residues are on binder chain)
-            residue_ids = list(interface.keys())
-            interface_list = [{"chain": binder_chain, "id": res_id} for res_id in residue_ids]
+            # Calculate target-side interface residues (bidirectional)
+            target_interface: dict[int, str] = {}
+            for target_chain in target_chains:
+                target_res = self._current_protein.get_interface_residues(
+                    binder_chain=target_chain,
+                    target_chains=[binder_chain],
+                    distance_cutoff=cutoff,
+                )
+                target_interface.update(target_res)
 
-            self._selection_panel.set_interface_result(residue_ids)
+            # Build binder-side interface as chain-aware list
+            binder_list = [
+                {"chain": binder_chain, "id": res_id}
+                for res_id in binder_interface.keys()
+            ]
+
+            # Build combined interface list for highlighting (both sides)
+            interface_list = list(binder_list)
+            for target_chain in target_chains:
+                target_res = self._current_protein.get_interface_residues(
+                    binder_chain=target_chain,
+                    target_chains=[binder_chain],
+                    distance_cutoff=cutoff,
+                )
+                for res_id in target_res:
+                    interface_list.append({"chain": target_chain, "id": res_id})
+
+            # Update selection panel with binder-side residues (chain-aware)
+            self._selection_panel.set_interface_result(
+                binder_list, len(target_interface)
+            )
             self._viewer.set_interface_residues(interface_list)
 
-            if residue_ids:
-                self._statusbar.showMessage(f"Found {len(residue_ids)} interface residues")
+            total = len(binder_list) + len(target_interface)
+            if total > 0:
+                self._statusbar.showMessage(
+                    f"Interface: {len(binder_list)} binder residues ({binder_chain}), "
+                    f"{len(target_interface)} target residues"
+                )
             else:
                 self._statusbar.showMessage("No interface residues found at this cutoff")
 
         except Exception as e:
+            logger.error(f"Interface calculation failed: {e}", exc_info=True)
             self._statusbar.showMessage(f"Interface calculation failed: {e}")
-            self._selection_panel.set_interface_result([])
+            self._selection_panel.set_interface_result([], 0)
 
     def _on_select_interface(self):
         """Handle select interface residues request."""
-        interface_ids = self._selection_panel.get_interface_residues()
-        if interface_ids:
-            # Get the binder chain from the selection panel
-            binder_chain = self._selection_panel.get_binder_chain()
-            # Convert to list of dicts with chain info
-            interface_list = [{"chain": binder_chain, "id": res_id} for res_id in interface_ids]
-            self._viewer.select_residues(interface_list)
-            self._statusbar.showMessage(f"Selected {len(interface_ids)} interface residues")
+        interface = self._selection_panel.get_interface_residues()
+        if interface:
+            self._viewer.select_residues(interface)
+            self._statusbar.showMessage(f"Selected {len(interface)} interface residues")
 
     def _on_clear_interface_requested(self):
         """Handle clear interface request."""
@@ -1123,6 +1280,70 @@ class MainWindow(QMainWindow):
         file_path = str(self._current_protein.file_path)
         self.show_target_designation_dialog(file_path)
 
+    def _on_auto_detect_targets(self) -> None:
+        """Handle View > Auto-Detect Targets action.
+
+        Loads all structures and uses shared chain sequences to detect targets.
+        """
+        if not self._current_folder:
+            QMessageBox.warning(self, "No Folder", "Please open a folder first.")
+            return
+
+        file_paths = self._file_list.get_all_file_paths()
+        if len(file_paths) < 2:
+            QMessageBox.warning(
+                self,
+                "Not Enough Structures",
+                "Auto-detection needs at least 2 structures.",
+            )
+            return
+
+        self._statusbar.showMessage("Auto-detecting targets...")
+
+        # Load proteins that aren't already registered
+        loaded = []
+        for fp in file_paths:
+            if fp in self._grouping_manager._proteins:
+                loaded.append((fp, self._grouping_manager._proteins[fp]))
+            else:
+                try:
+                    protein = Protein(fp)
+                    self._grouping_manager.register_protein(fp, protein)
+                    loaded.append((fp, protein))
+                except Exception as e:
+                    logger.warning(f"Failed to load {fp} for auto-detection: {e}")
+
+        if len(loaded) < 2:
+            QMessageBox.warning(self, "Error", "Could not load enough structures.")
+            return
+
+        designations = self._grouping_manager.auto_detect_targets(loaded)
+
+        if not designations:
+            QMessageBox.information(
+                self,
+                "Auto-Detect",
+                "No shared target chains detected. Structures may not share a common target.",
+            )
+            return
+
+        # Compute target groups and refresh
+        self._grouping_manager.compute_target_groups()
+        self._file_list.refresh_groups()
+
+        target_groups = self._grouping_manager.get_target_groups()
+        self._statusbar.showMessage(
+            f"Auto-detected targets: {len(designations)} structures, "
+            f"{len(target_groups)} target group(s)"
+        )
+        QMessageBox.information(
+            self,
+            "Auto-Detect Complete",
+            f"Detected {len(designations)} binder/target complexes across "
+            f"{len(target_groups)} target group(s).\n\n"
+            f"Use 'Designate Target Chains' to adjust individual designations.",
+        )
+
     def _on_theme_changed(self, theme) -> None:
         """Handle theme change.
 
@@ -1211,23 +1432,68 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage(f"Found {len(groups)} sequence groups from {len(proteins)} structures")
 
     def _on_binder_search_requested(
-        self, target_residues: list[tuple[str, int]], cutoff: float
+        self,
+        target_residues: list[tuple[str, int]],
+        cutoff: float,
+        min_target_contacts: int,
     ) -> None:
         """Handle binder search request.
+
+        Loads all proteins from the file list into the grouping manager
+        before running the spatial search.
 
         Args:
             target_residues: List of (chain_id, residue_id) tuples.
             cutoff: Distance cutoff in Angstroms.
+            min_target_contacts: Minimum number of target residues that must
+                be contacted for a binder to be included.
         """
-        results = self._grouping_manager.find_binders_contacting_residues(
-            target_residues, cutoff
+        file_paths = self._file_list.get_all_file_paths()
+        if not file_paths:
+            self._selection_panel.set_binder_search_results([], 0)
+            self._statusbar.showMessage("No structures loaded")
+            return
+
+        # Ensure all proteins are loaded and registered
+        self._statusbar.showMessage(f"Loading {len(file_paths)} structures for search...")
+        QApplication.processEvents()
+
+        loaded_count = 0
+        for fp in file_paths:
+            if fp not in self._grouping_manager._proteins:
+                try:
+                    protein = Protein(fp)
+                    self._grouping_manager.register_protein(fp, protein)
+                except Exception as e:
+                    logger.warning(f"Failed to load {fp} for binder search: {e}")
+            loaded_count += 1
+
+        self._statusbar.showMessage(
+            f"Searching {loaded_count} structures for contacts..."
         )
-        self._selection_panel.set_binder_search_results(results)
+        QApplication.processEvents()
+
+        num_target_residues = len(set(target_residues))
+
+        results = self._grouping_manager.find_binders_contacting_residues(
+            target_residues,
+            cutoff,
+            file_paths=file_paths,
+            min_target_contacts=min_target_contacts,
+        )
+        self._selection_panel.set_binder_search_results(
+            results, loaded_count, num_target_residues
+        )
 
         if results:
-            self._statusbar.showMessage(f"Found {len(results)} binders with contacts")
+            self._statusbar.showMessage(
+                f"Found {len(results)} binder(s) with contacts "
+                f"(searched {loaded_count} structures)"
+            )
         else:
-            self._statusbar.showMessage("No binders found with contacts to specified residues")
+            self._statusbar.showMessage(
+                f"No binders found (searched {loaded_count} structures)"
+            )
 
     def _on_binder_result_selected(self, file_path: str) -> None:
         """Handle binder result selection.
@@ -1236,6 +1502,24 @@ class MainWindow(QMainWindow):
             file_path: Path to selected binder structure.
         """
         self._load_protein(file_path)
+
+    def _on_binder_group_requested(
+        self, group_name: str, file_paths: list[str]
+    ) -> None:
+        """Create a custom group from binder search results.
+
+        Args:
+            group_name: Name for the new group.
+            file_paths: File paths of matching binders.
+        """
+        group = self._grouping_manager.create_custom_group(
+            name=group_name,
+            members=file_paths,
+        )
+        self._file_list.refresh_groups()
+        self._statusbar.showMessage(
+            f"Created group '{group_name}' with {len(group.members)} structures"
+        )
 
     def _on_create_group_from_chain(self, chain_id: str, group_name: str) -> None:
         """Handle request to create a group from structures with matching chain sequence.
@@ -1299,20 +1583,38 @@ class MainWindow(QMainWindow):
 
     def _restore_settings(self) -> None:
         """Restore saved user settings."""
+        vc = self._user_config.viewer
+
+        # Restore dark mode
+        if vc.dark_mode:
+            get_theme_manager().set_theme("dark")
+            self._dark_mode_action.setChecked(True)
+
+        # Restore sequence viewer cell size
+        self._viewer.sequence_viewer.set_cell_size(vc.cell_size)
+
+        # Restore default interface cutoff on selection panel
+        self._selection_panel.set_default_cutoff(vc.interface_cutoff)
+
         if self._user_config.filters.metric_ranges:
-            # Restore filters will be applied when metrics are loaded
             logger.debug(
                 f"Restored filter config with {len(self._user_config.filters.metric_ranges)} filters"
             )
 
-        if self._user_config.last_folder:
-            # Could auto-load last folder here if desired
-            pass
+        logger.debug(
+            f"Restored viewer prefs: cell_size={vc.cell_size}, "
+            f"color_scheme={vc.color_scheme}, dark_mode={vc.dark_mode}"
+        )
 
     def closeEvent(self, event) -> None:
         """Handle window close event."""
         # Save current folder
         self._user_config.last_folder = self._current_folder
+
+        # Save viewer preferences
+        self._user_config.viewer.dark_mode = get_theme_manager().is_dark_mode
+        self._user_config.viewer.cell_size = self._viewer.sequence_viewer.current_size
+
         save_config(self._user_config)
         event.accept()
 

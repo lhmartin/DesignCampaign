@@ -106,16 +106,37 @@ def clear_filters() -> bool:
 
 
 @dataclass
+class ViewerConfig:
+    """Configuration for viewer and selection preferences.
+
+    Attributes:
+        cell_size: Sequence viewer cell size ("small", "medium", "large").
+        color_scheme: Default color scheme name.
+        representation: Default visualization style.
+        interface_cutoff: Default interface distance cutoff in Angstroms.
+        dark_mode: Whether dark mode is enabled.
+    """
+
+    cell_size: str = "large"
+    color_scheme: str = "spectrum"
+    representation: str = "cartoon"
+    interface_cutoff: float = 4.0
+    dark_mode: bool = False
+
+
+@dataclass
 class UserConfig:
     """Complete user configuration.
 
     Attributes:
         filters: Filter configuration.
+        viewer: Viewer and selection preferences.
         last_folder: Last opened folder path.
         window_geometry: Window position and size.
     """
 
     filters: FilterConfig = field(default_factory=FilterConfig)
+    viewer: ViewerConfig = field(default_factory=ViewerConfig)
     last_folder: str | None = None
     window_geometry: dict[str, int] | None = None
 
@@ -142,6 +163,13 @@ def save_config(config: UserConfig) -> bool:
                     k: [v[0], v[1]]
                     for k, v in config.filters.metric_ranges.items()
                 }
+            },
+            "viewer": {
+                "cell_size": config.viewer.cell_size,
+                "color_scheme": config.viewer.color_scheme,
+                "representation": config.viewer.representation,
+                "interface_cutoff": config.viewer.interface_cutoff,
+                "dark_mode": config.viewer.dark_mode,
             },
             "last_folder": config.last_folder,
             "window_geometry": config.window_geometry,
@@ -177,8 +205,19 @@ def load_config() -> UserConfig:
             if isinstance(v, list) and len(v) == 2:
                 metric_ranges[k] = (v[0], v[1])
 
+        # Parse viewer config
+        viewer_data = data.get("viewer", {})
+        viewer = ViewerConfig(
+            cell_size=viewer_data.get("cell_size", "large"),
+            color_scheme=viewer_data.get("color_scheme", "spectrum"),
+            representation=viewer_data.get("representation", "cartoon"),
+            interface_cutoff=viewer_data.get("interface_cutoff", 4.0),
+            dark_mode=viewer_data.get("dark_mode", False),
+        )
+
         return UserConfig(
             filters=FilterConfig(metric_ranges=metric_ranges),
+            viewer=viewer,
             last_folder=data.get("last_folder"),
             window_geometry=data.get("window_geometry"),
         )

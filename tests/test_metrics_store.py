@@ -1,10 +1,11 @@
 """Tests for metrics store and data models."""
 
 import json
+import os
+import tempfile
+
 import pytest
 from pathlib import Path
-import tempfile
-import os
 
 from src.models.metrics_store import MetricsStore, ProteinMetrics
 
@@ -374,3 +375,116 @@ class TestMetricsStore:
                     assert loaded.get_metric(metric) == original.get_metric(metric)
         finally:
             os.unlink(temp_path)
+
+
+class TestDictListScanning:
+    """Tests for _scan_dict_list_for_metrics and related helpers."""
+
+    @pytest.fixture
+    def store(self):
+        return MetricsStore()
+
+    def test_chain_pair_labeling(self, store):
+        """Test that chain1/chain2 keys produce A_B labels."""
+        items = [
+            {"chain1": "A", "chain2": "B", "pdockq": 0.5, "pdockq2": 0.8},
+        ]
+        metrics: dict[str, float] = {}
+        store._scan_dict_list_for_metrics(items, "scores", metrics)
+        assert metrics["scores.A_B.pdockq"] == 0.5
+        assert metrics["scores.A_B.pdockq2"] == 0.8
+
+    def test_complex_pae_scores_format(self, store):
+        """Test realistic complex_pae_scores JSON structure."""
+        data = {
+            "complex_pae_scores": [
+                {
+                    "chain1": "A", "chain2": "B",
+                    "ipsae_max": 0.0, "ipsae_mean": 0.0,
+                    "pdockq": 0.123, "pdockq2": 0.456,
+                },
+                {
+                    "chain1": "B", "chain2": "A",
+                    "ipsae_max": 0.1, "ipsae_mean": 0.05,
+                    "pdockq": 0.789, "pdockq2": 0.321,
+                },
+            ]
+        }
+        metrics: dict[str, float] = {}
+        store._scan_json_for_metrics(data, "", metrics)
+        # Per-entry metrics
+        assert metrics["complex_pae_scores.A_B.pdockq"] == 0.123
+        assert metrics["complex_pae_scores.B_A.pdockq"] == 0.789
+        assert metrics["complex_pae_scores.A_B.pdockq2"] == 0.456
+        # Aggregate stats across entries
+        assert metrics["complex_pae_scores.pdockq_max"] == 0.789
+        assert metrics["complex_pae_scores.pdockq_min"] == 0.123
+        assert metrics["complex_pae_scores.pdockq_mean"] == pytest.approx(
+            (0.123 + 0.789) / 2, rel=0.001
+        )
+
+    def test_aggregate_stats_multiple_entries(self, store):
+        """Test aggregate min/max/mean across multiple dict entries."""
+        items = [
+            {"chain1": "A", "chain2": "B", "score": 10.0},
+            {"chain1": "A", "chain2": "C", "score": 30.0},
+            {"chain1": "B", "chain2": "C", "score": 20.0},
+        ]
+        metrics: dict[str, float] = {}
+        store._scan_dict_list_for_metrics(items, "test", metrics)
+        assert metrics["test.score_max"] == 30.0
+        assert metrics["test.score_min"] == 10.0
+        assert metrics["test.score_mean"] == pytest.approx(20.0)
+
+    def test_single_entry_no_aggregates(self, store):
+        """Test that single-entry lists don't produce aggregate stats."""
+        items = [
+            {"chain1": "A", "chain2": "B", "pdockq": 0.5},
+        ]
+        metrics: dict[str, float] = {}
+        store._scan_dict_list_for_metrics(items, "test", metrics)
+        assert "test.pdockq_max" not in metrics
+        assert "test.pdockq_min" not in metrics
+
+    def test_get_dict_label_chain_pair(self, store):
+        """Test chain pair detection."""
+        item = {"chain1": "A", "chain2": "B", "score": 1.0}
+        assert store._get_dict_label(item, 0) == "A_B"
+
+    def test_get_dict_label_underscore_variant(self, store):
+        """Test chain_1/chain_2 variant."""
+        item = {"chain_1": "X", "chain_2": "Y", "score": 1.0}
+        assert store._get_dict_label(item, 0) == "X_Y"
+
+    def test_get_dict_label_single_key(self, store):
+        """Test fallback to single label key."""
+        item = {"name": "interaction1", "score": 1.0}
+        assert store._get_dict_label(item, 0) == "interaction1"
+
+    def test_get_dict_label_fallback_index(self, store):
+        """Test fallback to list index."""
+        item = {"score": 1.0, "energy": -2.5}
+        assert store._get_dict_label(item, 3) == "3"
+
+    def test_label_keys_skipped_as_metrics(self, store):
+        """Test that label keys (chain1, chain2, etc.) are not stored as metrics."""
+        items = [
+            {"chain1": "A", "chain2": "B", "pdockq": 0.5},
+        ]
+        metrics: dict[str, float] = {}
+        store._scan_dict_list_for_metrics(items, "test", metrics)
+        assert "test.A_B.chain1" not in metrics
+        assert "test.A_B.chain2" not in metrics
+
+    def test_empty_list(self, store):
+        """Test empty list produces no metrics."""
+        metrics: dict[str, float] = {}
+        store._scan_dict_list_for_metrics([], "test", metrics)
+        assert metrics == {}
+
+    def test_max_depth_respected(self, store):
+        """Test that max_depth=0 produces no output."""
+        items = [{"chain1": "A", "chain2": "B", "score": 1.0}]
+        metrics: dict[str, float] = {}
+        store._scan_dict_list_for_metrics(items, "test", metrics, max_depth=0)
+        assert metrics == {}

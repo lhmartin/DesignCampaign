@@ -31,17 +31,17 @@ class ResidueCell(QWidget):
 
     clicked = pyqtSignal(str, int, bool)  # (chain, residue_id, ctrl_held)
 
-    # Cell size configurations
+    # Cell size configurations - widths kept tight around letters for dense display
     CELL_SIZES = {
-        "small": {"width": 14, "height": 18, "font": 8},
-        "medium": {"width": 18, "height": 24, "font": 10},
-        "large": {"width": 22, "height": 28, "font": 11},
+        "small": {"width": 9, "height": 16, "font": 7},
+        "medium": {"width": 12, "height": 20, "font": 9},
+        "large": {"width": 16, "height": 24, "font": 10},
     }
 
     # Default cell styling constants
-    CELL_WIDTH = 22
-    CELL_HEIGHT = 28
-    FONT_SIZE = 11
+    CELL_WIDTH = 16
+    CELL_HEIGHT = 24
+    FONT_SIZE = 10
 
     # Theme colors (class-level, updated by theme manager)
     _theme_bg = "#f8f8f8"
@@ -187,10 +187,16 @@ class ResidueCell(QWidget):
 class ChainSeparator(QFrame):
     """Visual separator between chains."""
 
+    SEPARATOR_WIDTH = 18
+
+    # Theme colors (class-level, updated by theme manager)
+    _theme_line = "#999999"
+    _theme_text = "#666666"
+
     def __init__(self, chain_id: str, parent=None):
         super().__init__(parent)
         self._chain_id = chain_id
-        self.setFixedWidth(24)
+        self.setFixedWidth(self.SEPARATOR_WIDTH)
         self.setFixedHeight(ResidueCell.CELL_HEIGHT)
         self.setToolTip(f"Chain {chain_id}")
 
@@ -199,7 +205,7 @@ class ChainSeparator(QFrame):
         painter = QPainter(self)
 
         # Draw vertical line
-        pen = QPen(QColor("#999999"), 1)
+        pen = QPen(QColor(ChainSeparator._theme_line), 1)
         painter.setPen(pen)
         x = self.width() // 2
         painter.drawLine(x, 2, x, self.height() - 2)
@@ -208,12 +214,18 @@ class ChainSeparator(QFrame):
         font = QFont("Arial", 8)
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QColor("#666666"))
+        painter.setPen(QColor(ChainSeparator._theme_text))
         painter.drawText(
             0, 0, self.width(), self.height(),
             Qt.AlignmentFlag.AlignCenter,
             self._chain_id
         )
+
+    @classmethod
+    def set_theme_colors(cls, line: str, text: str) -> None:
+        """Set theme colors for all separators."""
+        cls._theme_line = line
+        cls._theme_text = text
 
 
 class SequenceViewer(QWidget):
@@ -303,8 +315,8 @@ class SequenceViewer(QWidget):
         # Container for residue cells
         self._sequence_container = QWidget()
         self._sequence_layout = QHBoxLayout(self._sequence_container)
-        self._sequence_layout.setContentsMargins(5, 0, 5, 0)
-        self._sequence_layout.setSpacing(1)
+        self._sequence_layout.setContentsMargins(2, 0, 2, 0)
+        self._sequence_layout.setSpacing(0)
 
         self._scroll_area.setWidget(self._sequence_container)
         layout.addWidget(self._scroll_area)
@@ -386,7 +398,7 @@ class SequenceViewer(QWidget):
         total_width = (
             margins.left() + margins.right() +
             num_cells * ResidueCell.CELL_WIDTH +
-            num_separators * 24 +  # ChainSeparator width is 24
+            num_separators * ChainSeparator.SEPARATOR_WIDTH +
             (total_widgets - 1) * spacing if total_widgets > 0 else 0
         )
 
@@ -559,18 +571,26 @@ class SequenceViewer(QWidget):
         Args:
             theme: New theme object.
         """
-        # Update cell theme colors
+        # Update cell and separator theme colors
         if theme.name == "dark":
             ResidueCell.set_theme_colors(
                 bg="#2d2d2d",
                 fg="#e0e0e0",
                 border="#555555",
             )
+            ChainSeparator.set_theme_colors(
+                line="#666666",
+                text="#9d9d9d",
+            )
         else:
             ResidueCell.set_theme_colors(
                 bg="#f8f8f8",
                 fg="#333333",
                 border="#cccccc",
+            )
+            ChainSeparator.set_theme_colors(
+                line="#999999",
+                text="#666666",
             )
 
         # Update viewer background
@@ -582,6 +602,11 @@ class SequenceViewer(QWidget):
             }}
         """)
 
-        # Update all existing cells
+        # Update all existing cells and separators
         for cell in self._residue_cells.values():
             cell.update()
+        # Repaint separators too
+        for i in range(self._sequence_layout.count()):
+            widget = self._sequence_layout.itemAt(i).widget()
+            if isinstance(widget, ChainSeparator):
+                widget.update()

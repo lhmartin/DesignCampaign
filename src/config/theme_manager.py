@@ -297,18 +297,23 @@ class ThemeManager:
                 width: 0;
             }}
 
-            /* Splitter - larger handles for easier dragging */
+            /* Splitter - wider handles for easier dragging */
             QSplitter::handle {{
                 background-color: {t.border};
-                border-radius: 3px;
             }}
             QSplitter::handle:horizontal {{
-                width: 6px;
-                margin: 4px 0px;
+                width: 8px;
+                margin: 0px;
+                border-left: 3px solid {t.background};
+                border-right: 3px solid {t.background};
+                background-color: {t.border};
             }}
             QSplitter::handle:vertical {{
-                height: 6px;
-                margin: 0px 4px;
+                height: 8px;
+                margin: 0px;
+                border-top: 3px solid {t.background};
+                border-bottom: 3px solid {t.background};
+                background-color: {t.border};
             }}
             QSplitter::handle:hover {{
                 background-color: {t.accent};

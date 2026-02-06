@@ -27,12 +27,11 @@ CHAIN_COLORS = [
     "#17becf",  # cyan
 ]
 
-# Secondary structure colors
+# Secondary structure colors (matching 3Dmol.js ssJmol scheme)
 SECONDARY_STRUCTURE_COLORS = {
-    "helix": "#ff0000",   # red
-    "sheet": "#0000ff",   # blue
-    "coil": "#808080",    # gray
-    "turn": "#00ff00",    # green
+    "helix": "#ff0080",   # magenta/hot pink
+    "sheet": "#ffc800",   # golden yellow
+    "coil": "#ffffff",    # white
 }
 
 
@@ -137,8 +136,8 @@ class SecondaryStructureScheme(ColorScheme):
 
     def get_legend(self) -> list[ColorLegendItem]:
         return [
-            ColorLegendItem("Helix", SECONDARY_STRUCTURE_COLORS["helix"]),
-            ColorLegendItem("Sheet", SECONDARY_STRUCTURE_COLORS["sheet"]),
+            ColorLegendItem("Helix (α)", SECONDARY_STRUCTURE_COLORS["helix"]),
+            ColorLegendItem("Sheet (β)", SECONDARY_STRUCTURE_COLORS["sheet"]),
             ColorLegendItem("Coil", SECONDARY_STRUCTURE_COLORS["coil"]),
         ]
 
