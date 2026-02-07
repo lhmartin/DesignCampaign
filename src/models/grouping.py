@@ -791,6 +791,81 @@ class GroupingManager:
         """Get number of registered proteins."""
         return len(self._proteins)
 
+    def compute_binder_subgroups(self, target_group: StructureGroup) -> list[StructureGroup]:
+        """Compute sub-groups within a target group by binder chain sequences.
+
+        Structures with identical binder sequences (same complex, different
+        folding models) are grouped together.
+
+        Args:
+            target_group: A target group to sub-divide.
+
+        Returns:
+            List of StructureGroup instances for each unique binder sequence.
+            Groups with only 1 member are still returned for display purposes.
+        """
+        # Get target designation to know which chains are binders
+        binder_hash_to_paths: dict[str, list[str]] = {}
+        binder_hash_preview: dict[str, str] = {}
+
+        for file_path in target_group.members:
+            designation = self._designations.get(file_path)
+            protein = self._proteins.get(file_path)
+            if not designation or not protein:
+                # No designation or unloaded - put in a "unknown" bucket
+                key = "_undesignated"
+                binder_hash_to_paths.setdefault(key, []).append(file_path)
+                continue
+
+            # Hash the binder chain sequences
+            sequence = protein.get_sequence()
+            binder_seqs = []
+            for chain in sorted(designation.binder_chains):
+                chain_seq = "".join(
+                    r["one_letter"] for r in sequence if r["chain"] == chain
+                )
+                if chain_seq:
+                    binder_seqs.append(f"{chain}:{chain_seq}")
+
+            if not binder_seqs:
+                key = "_no_binder"
+                binder_hash_to_paths.setdefault(key, []).append(file_path)
+                continue
+
+            combined = "|".join(binder_seqs)
+            binder_hash = hashlib.md5(combined.encode()).hexdigest()[:12]
+            binder_hash_to_paths.setdefault(binder_hash, []).append(file_path)
+
+            if binder_hash not in binder_hash_preview:
+                # Store a preview of the first binder chain sequence
+                first_seq = binder_seqs[0].split(":", 1)[1] if binder_seqs else ""
+                preview = first_seq[:20] + ("..." if len(first_seq) > 20 else "")
+                binder_hash_preview[binder_hash] = preview
+
+        # Create sub-groups
+        subgroups = []
+        for i, (key, paths) in enumerate(sorted(binder_hash_to_paths.items())):
+            preview = binder_hash_preview.get(key, "")
+            if key.startswith("_"):
+                name = f"Ungrouped ({len(paths)})"
+            elif len(paths) > 1:
+                name = f"Binder {preview} ({len(paths)} models)"
+            else:
+                # Single member - no sub-group label needed
+                name = f"Binder {preview}"
+
+            subgroup = StructureGroup(
+                id=f"{target_group.id}_sub_{key}",
+                name=name,
+                group_type="binder_subgroup",
+                key=key,
+                members=paths,
+                metadata={"binder_preview": preview},
+            )
+            subgroups.append(subgroup)
+
+        return subgroups
+
     # Custom group management
 
     def create_custom_group(

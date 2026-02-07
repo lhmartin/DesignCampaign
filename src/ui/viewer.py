@@ -468,6 +468,56 @@ VIEWER_HTML = """
             applyCurrentStyle();
         }
 
+        // Multi-model comparison support
+        let models = [];  // [{name, color, visible}]
+
+        function addAlignedModel(pdbData, format, name, color) {
+            if (!viewer) initViewer();
+            let model = viewer.addModel(pdbData, format);
+            let idx = models.length;
+            models.push({name: name, color: color, visible: true});
+            // Style the comparison model with the given color
+            viewer.setStyle({model: idx + 1}, {
+                cartoon: {color: color, opacity: 0.7}
+            });
+            viewer.render();
+            return idx + 1;  // model index (0 is primary)
+        }
+
+        function setModelVisible(modelIndex, visible) {
+            if (!viewer || modelIndex < 0 || modelIndex > models.length) return;
+            if (modelIndex === 0) return;  // Don't hide primary model this way
+            let info = models[modelIndex - 1];
+            info.visible = visible;
+            if (visible) {
+                viewer.setStyle({model: modelIndex}, {
+                    cartoon: {color: info.color, opacity: 0.7}
+                });
+            } else {
+                viewer.setStyle({model: modelIndex}, {});
+            }
+            viewer.render();
+        }
+
+        function clearComparisonModels() {
+            // Hide all models except primary (index 0)
+            for (let i = 0; i < models.length; i++) {
+                viewer.setStyle({model: i + 1}, {});
+                models[i].visible = false;
+            }
+            viewer.render();
+        }
+
+        function removeAllModels() {
+            if (viewer) {
+                viewer.clear();
+                models = [];
+                selectedResidues = [];
+                metricColorMap = {};
+                hoveredResidue = null;
+            }
+        }
+
         // Initialize on load
         document.addEventListener('DOMContentLoaded', initViewer);
     </script>
@@ -886,6 +936,38 @@ class ProteinViewer(QWidget):
     def sequence_viewer(self) -> SequenceViewer:
         """Get the sequence viewer widget."""
         return self._sequence_viewer
+
+    # Multi-model comparison methods
+
+    def add_comparison_structure(
+        self, name: str, color: str, pdb_text: str
+    ) -> None:
+        """Add a comparison structure to the viewer (overlaid on primary).
+
+        Args:
+            name: Display name for the structure.
+            color: Hex color for the structure.
+            pdb_text: PDB-format text of the aligned structure.
+        """
+        pdb_escaped = json.dumps(pdb_text)
+        name_escaped = json.dumps(name)
+        self._web_view.page().runJavaScript(
+            f"addAlignedModel({pdb_escaped}, 'pdb', {name_escaped}, '{color}');"
+        )
+
+    def clear_comparison_models(self) -> None:
+        """Hide all comparison models, keeping only the primary."""
+        self._web_view.page().runJavaScript("clearComparisonModels();")
+
+    def set_model_visible(self, index: int, visible: bool) -> None:
+        """Toggle visibility of a comparison model.
+
+        Args:
+            index: Model index (1-based, 0 is primary).
+            visible: Whether the model should be visible.
+        """
+        flag = "true" if visible else "false"
+        self._web_view.page().runJavaScript(f"setModelVisible({index}, {flag});")
 
     @property
     def interface_residues(self) -> list[dict]:

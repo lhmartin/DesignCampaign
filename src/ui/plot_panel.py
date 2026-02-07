@@ -504,7 +504,7 @@ class PlotPanel(QWidget):
         layout.addWidget(metric_group)
 
         # Filter option
-        self._filter_checkbox = QCheckBox("Only show filtered proteins")
+        self._filter_checkbox = QCheckBox("Only show proteins that pass current filters")
         self._filter_checkbox.setToolTip(
             "When checked, only proteins passing the current metric filters will be plotted"
         )

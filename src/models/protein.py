@@ -283,6 +283,37 @@ class Protein:
             distance_cutoff=distance_cutoff,
         )
 
+    def get_aligned_pdb_text(
+        self,
+        reference: "Protein",
+        align_chain: str,
+    ) -> tuple[str, float]:
+        """Align this structure onto a reference and return PDB text.
+
+        Args:
+            reference: Reference protein to align onto.
+            align_chain: Chain ID to use for alignment (must exist in both).
+
+        Returns:
+            Tuple of (PDB-format text of aligned structure, RMSD).
+
+        Raises:
+            ValueError: If alignment fails (missing chain, length mismatch).
+        """
+        from src.models.alignment import align_on_target_chain
+        import io
+
+        aligned_structure, rmsd = align_on_target_chain(
+            reference.structure, self.structure, align_chain
+        )
+
+        # Write aligned structure to PDB string
+        pdb_file = pdb.PDBFile()
+        pdb_file.set_structure(aligned_structure)
+        sio = io.StringIO()
+        pdb_file.write(sio)
+        return sio.getvalue(), rmsd
+
     def __repr__(self) -> str:
         """Return string representation of the Protein."""
         loaded = "loaded" if self.is_loaded else "not loaded"
