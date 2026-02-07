@@ -23,8 +23,10 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QCheckBox,
     QAbstractItemView,
+    QScrollArea,
+    QMenu,
 )
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QAction
 
 from src.models.metrics_store import MetricsStore, ProteinMetrics
 
@@ -357,11 +359,13 @@ class MetricsTableWidget(QWidget):
     protein_selected = pyqtSignal(str)  # protein name
     protein_double_clicked = pyqtSignal(str)  # protein name
     filters_changed = pyqtSignal(dict)  # {metric_name: (min_val, max_val), ...}
+    popout_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._store = MetricsStore()
         self._filter_widgets: dict[str, FilterWidget] = {}
+        self._hidden_columns: set[str] = set()
         self._init_ui()
 
     def _init_ui(self):
@@ -374,7 +378,7 @@ class MetricsTableWidget(QWidget):
         filter_layout = QVBoxLayout(filter_group)
         filter_layout.setSpacing(4)
 
-        # Metric filter search
+        # Metric filter search row + buttons
         search_layout = QHBoxLayout()
         search_layout.addWidget(QLabel("Search:"))
         self._filter_search_input = QLineEdit()
@@ -388,11 +392,38 @@ class MetricsTableWidget(QWidget):
 
         filter_layout.addLayout(search_layout)
 
-        # Metric filters container
-        self._metric_filters_layout = QVBoxLayout()
-        filter_layout.addLayout(self._metric_filters_layout)
+        # Metric filters container inside a scroll area
+        self._filters_container = QWidget()
+        self._metric_filters_layout = QVBoxLayout(self._filters_container)
+        self._metric_filters_layout.setContentsMargins(0, 0, 0, 0)
+        self._metric_filters_layout.setSpacing(4)
 
-        layout.addWidget(filter_group)
+        self._filters_scroll = QScrollArea()
+        self._filters_scroll.setWidgetResizable(True)
+        self._filters_scroll.setWidget(self._filters_container)
+        self._filters_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        filter_layout.addWidget(self._filters_scroll)
+
+        layout.addWidget(filter_group, 1)  # Stretch 1: filters take ~1/3
+
+        # Toolbar row: Pop Out + Columns
+        toolbar_layout = QHBoxLayout()
+        toolbar_layout.setSpacing(4)
+
+        self._popout_btn = QPushButton("Pop Out")
+        self._popout_btn.setToolTip("Open metrics table in a separate window")
+        self._popout_btn.clicked.connect(self.popout_requested.emit)
+        toolbar_layout.addWidget(self._popout_btn)
+
+        self._columns_btn = QPushButton("Columns...")
+        self._columns_btn.setToolTip("Toggle column visibility")
+        self._columns_btn.clicked.connect(self._on_columns_clicked)
+        toolbar_layout.addWidget(self._columns_btn)
+
+        toolbar_layout.addStretch()
+        layout.addLayout(toolbar_layout)
 
         # Table
         self._model = MetricsTableModel(self)
@@ -416,7 +447,7 @@ class MetricsTableWidget(QWidget):
         self._table.selectionModel().currentChanged.connect(self._on_selection_changed)
         self._table.doubleClicked.connect(self._on_double_clicked)
 
-        layout.addWidget(self._table, 1)
+        layout.addWidget(self._table, 2)  # Stretch 2: table takes ~2/3
 
         # Status bar
         self._status_label = QLabel("No data loaded")
@@ -432,6 +463,7 @@ class MetricsTableWidget(QWidget):
         self._store = store
         self._model.set_store(store)
         self._update_metric_filters()
+        self._apply_hidden_columns()
         self._update_status()
 
     def refresh(self) -> None:
@@ -504,6 +536,61 @@ class MetricsTableWidget(QWidget):
         self._proxy_model.clear_filters()
         self._update_status()
         self._emit_filters()
+
+    def _on_columns_clicked(self) -> None:
+        """Show column visibility menu."""
+        menu = QMenu(self)
+        col_count = self._model.columnCount()
+        for col in range(col_count):
+            col_name = self._model.get_column_name(col)
+            if col_name is None:
+                continue
+            # Protein column is always visible
+            if col == 0:
+                continue
+            action = QAction(col_name, menu)
+            action.setCheckable(True)
+            action.setChecked(col_name not in self._hidden_columns)
+            action.toggled.connect(lambda checked, c=col, n=col_name: self._on_column_toggled(c, n, checked))
+            menu.addAction(action)
+        menu.exec(self._columns_btn.mapToGlobal(self._columns_btn.rect().bottomLeft()))
+
+    def _on_column_toggled(self, col: int, name: str, visible: bool) -> None:
+        """Handle column visibility toggle."""
+        self._table.setColumnHidden(col, not visible)
+        if visible:
+            self._hidden_columns.discard(name)
+        else:
+            self._hidden_columns.add(name)
+
+    def set_hidden_columns(self, column_names: list[str]) -> None:
+        """Restore hidden columns from saved config.
+
+        Args:
+            column_names: List of column names to hide.
+        """
+        self._hidden_columns = set(column_names)
+        self._apply_hidden_columns()
+
+    def get_hidden_columns(self) -> list[str]:
+        """Get list of currently hidden column names."""
+        return list(self._hidden_columns)
+
+    def _apply_hidden_columns(self) -> None:
+        """Apply hidden column state to the table view."""
+        col_count = self._model.columnCount()
+        for col in range(1, col_count):
+            col_name = self._model.get_column_name(col)
+            if col_name:
+                self._table.setColumnHidden(col, col_name in self._hidden_columns)
+
+    def set_popout_button_text(self, text: str) -> None:
+        """Set the pop-out button text (e.g., 'Pop Out' or 'Dock').
+
+        Args:
+            text: Button label.
+        """
+        self._popout_btn.setText(text)
 
     def _emit_filters(self) -> None:
         """Emit the current filter state."""

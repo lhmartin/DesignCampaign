@@ -35,6 +35,7 @@ from src.config.color_schemes import (
     ChainScheme,
 )
 from src.models.metrics import AVAILABLE_METRICS
+from src.ui.collapsible_group import CollapsibleGroupBox
 
 
 class ColorLegendWidget(QWidget):
@@ -127,6 +128,7 @@ class SelectionPanel(QWidget):
         self._selected_color: str = "#ff0000"  # Default red for selection coloring
         self._chain_ids: list[str] = []  # Current structure's chain IDs
         self._chain_lengths: dict[str, int] = {}  # Chain ID -> residue count
+        self._collapsible_groups: dict[str, CollapsibleGroupBox] = {}
         self._init_ui()
 
     def _init_ui(self):
@@ -142,37 +144,57 @@ class SelectionPanel(QWidget):
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(10)
 
+        # Default collapsed states: True = collapsed
+        default_collapsed = {
+            "Selection": False,
+            "Interface": False,
+            "Color Scheme": False,
+            "Search Binders by Contact": True,
+            "Export Selection": True,
+            "Metric Coloring": True,
+            "Sequence Info": True,
+            "Create Group from Chain": True,
+        }
+
         # Selection group
         selection_group = self._create_selection_group()
-        main_layout.addWidget(selection_group)
+        sel_cg = self._wrap_in_collapsible("Selection", selection_group, default_collapsed)
+        main_layout.addWidget(sel_cg)
 
         # Interface group
         interface_group = self._create_interface_group()
-        main_layout.addWidget(interface_group)
-
-        # Binder search group
-        binder_search_group = self._create_binder_search_group()
-        main_layout.addWidget(binder_search_group)
-
-        # Export group
-        export_group = self._create_export_group()
-        main_layout.addWidget(export_group)
+        iface_cg = self._wrap_in_collapsible("Interface", interface_group, default_collapsed)
+        main_layout.addWidget(iface_cg)
 
         # Color scheme group
         color_group = self._create_color_scheme_group()
-        main_layout.addWidget(color_group)
+        color_cg = self._wrap_in_collapsible("Color Scheme", color_group, default_collapsed)
+        main_layout.addWidget(color_cg)
+
+        # Binder search group
+        binder_search_group = self._create_binder_search_group()
+        binder_cg = self._wrap_in_collapsible("Search Binders by Contact", binder_search_group, default_collapsed)
+        main_layout.addWidget(binder_cg)
+
+        # Export group
+        export_group = self._create_export_group()
+        export_cg = self._wrap_in_collapsible("Export Selection", export_group, default_collapsed)
+        main_layout.addWidget(export_cg)
 
         # Metric coloring group
         metric_group = self._create_metric_group()
-        main_layout.addWidget(metric_group)
+        metric_cg = self._wrap_in_collapsible("Metric Coloring", metric_group, default_collapsed)
+        main_layout.addWidget(metric_cg)
 
         # Sequence info group
         seq_info_group = self._create_sequence_info_group()
-        main_layout.addWidget(seq_info_group)
+        seq_cg = self._wrap_in_collapsible("Sequence Info", seq_info_group, default_collapsed)
+        main_layout.addWidget(seq_cg)
 
         # Chain group creation
         chain_group_box = self._create_chain_group_group()
-        main_layout.addWidget(chain_group_box)
+        chain_cg = self._wrap_in_collapsible("Create Group from Chain", chain_group_box, default_collapsed)
+        main_layout.addWidget(chain_cg)
 
         # Stretch at bottom
         main_layout.addStretch()
@@ -187,6 +209,62 @@ class SelectionPanel(QWidget):
         # Set reasonable width
         self.setMinimumWidth(200)
         self.setMaximumWidth(300)
+
+    def _wrap_in_collapsible(
+        self,
+        title: str,
+        group_box: QGroupBox,
+        default_collapsed: dict[str, bool],
+    ) -> CollapsibleGroupBox:
+        """Wrap an existing QGroupBox's contents into a CollapsibleGroupBox.
+
+        Args:
+            title: Section title.
+            group_box: QGroupBox whose layout contents will be moved.
+            default_collapsed: Dict of default collapsed states.
+
+        Returns:
+            CollapsibleGroupBox containing the group's widgets.
+        """
+        collapsed = default_collapsed.get(title, False)
+        cg = CollapsibleGroupBox(title, collapsed=collapsed)
+
+        # Move the QGroupBox's layout contents into the collapsible group
+        old_layout = group_box.layout()
+        if old_layout:
+            while old_layout.count():
+                item = old_layout.takeAt(0)
+                if item.widget():
+                    cg.add_widget(item.widget())
+                elif item.layout():
+                    cg.add_layout(item.layout())
+
+        # Discard the now-empty QGroupBox
+        group_box.deleteLater()
+
+        self._collapsible_groups[title] = cg
+        return cg
+
+    def get_collapsed_states(self) -> dict[str, bool]:
+        """Get current collapsed states of all sections.
+
+        Returns:
+            Dict mapping section title to collapsed state.
+        """
+        return {
+            title: cg.is_collapsed
+            for title, cg in self._collapsible_groups.items()
+        }
+
+    def set_collapsed_states(self, states: dict[str, bool]) -> None:
+        """Restore collapsed states from saved config.
+
+        Args:
+            states: Dict mapping section title to collapsed state.
+        """
+        for title, collapsed in states.items():
+            if title in self._collapsible_groups:
+                self._collapsible_groups[title].set_collapsed(collapsed)
 
     def _create_selection_group(self) -> QGroupBox:
         """Create the selection controls group."""

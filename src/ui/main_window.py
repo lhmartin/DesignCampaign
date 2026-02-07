@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QMessageBox,
     QSizePolicy,
+    QProgressDialog,
 )
 
 from src.config.settings import (
@@ -40,6 +41,7 @@ from src.models.protein import Protein
 from src.models.metrics import MetricResult
 from src.models.metrics_store import MetricsStore, ProteinMetrics
 from src.models.grouping import GroupingManager
+from src.ui.comparison_panel import ComparisonDialog
 
 logger = logging.getLogger(__name__)
 
@@ -90,64 +92,6 @@ class BatchMetricWorker(QThread):
         self.finished.emit()
 
 
-class SequenceGroupWorker(QThread):
-    """Worker thread for computing sequence groups without blocking UI."""
-
-    progress = pyqtSignal(int, int, str)  # current, total, current_file
-    protein_loaded = pyqtSignal(str, object)  # file_path, Protein
-    finished = pyqtSignal(list)  # list of (file_path, Protein) tuples
-    error = pyqtSignal(str, str)  # file_path, error message
-
-    def __init__(self, file_paths: list[str], grouping_manager: "GroupingManager"):
-        super().__init__()
-        self._file_paths = file_paths
-        self._grouping_manager = grouping_manager
-        self._cancelled = False
-
-    def cancel(self):
-        """Cancel the operation."""
-        self._cancelled = True
-
-    def run(self):
-        total = len(self._file_paths)
-        proteins = []
-
-        for i, file_path in enumerate(self._file_paths):
-            if self._cancelled:
-                break
-
-            name = Path(file_path).name
-            self.progress.emit(i + 1, total, name)
-
-            # Check if we have cached hash - if so, we still need to load
-            # but can skip if hash is already available and valid
-            cached_result = self._grouping_manager.get_or_compute_sequence_hash(file_path)
-            if cached_result is not None:
-                # Hash is cached, but we still need the protein for grouping
-                # Only load if not already registered
-                if file_path not in self._grouping_manager._proteins:
-                    try:
-                        protein = Protein(file_path)
-                        proteins.append((file_path, protein))
-                        self.protein_loaded.emit(file_path, protein)
-                    except Exception as e:
-                        self.error.emit(file_path, str(e))
-                else:
-                    # Already have the protein
-                    protein = self._grouping_manager._proteins[file_path]
-                    proteins.append((file_path, protein))
-            else:
-                # No cache, need to load and compute
-                try:
-                    protein = Protein(file_path)
-                    proteins.append((file_path, protein))
-                    self.protein_loaded.emit(file_path, protein)
-                except Exception as e:
-                    self.error.emit(file_path, str(e))
-
-        self.finished.emit(proteins)
-
-
 class MainWindow(QMainWindow):
     """Main application window with file list, metrics table, protein viewer, and selection panel."""
 
@@ -158,10 +102,10 @@ class MainWindow(QMainWindow):
         self._current_folder: str | None = None
         self._metric_worker: MetricCalculationWorker | None = None
         self._batch_worker: BatchMetricWorker | None = None
-        self._sequence_group_worker: SequenceGroupWorker | None = None
         self._metrics_store = MetricsStore()
         self._grouping_manager = GroupingManager()
         self._user_config = load_config()
+        self._metrics_popout: QMainWindow | None = None
         self._init_ui()
         self._init_menu()
         self._init_statusbar()
@@ -284,6 +228,23 @@ class MainWindow(QMainWindow):
         export_filtered_csv_action.triggered.connect(self._on_export_filtered_csv)
         export_menu.addAction(export_filtered_csv_action)
 
+        # Export Selection submenu
+        export_sel_menu = file_menu.addMenu("Export &Selection")
+
+        export_sel_fasta_action = QAction("To &FASTA...", self)
+        export_sel_fasta_action.setStatusTip("Export selected residues as FASTA")
+        export_sel_fasta_action.triggered.connect(
+            lambda: self._selection_panel._on_export_selection("fasta")
+        )
+        export_sel_menu.addAction(export_sel_fasta_action)
+
+        export_sel_csv_action = QAction("To &CSV...", self)
+        export_sel_csv_action.setStatusTip("Export selected residues as CSV")
+        export_sel_csv_action.triggered.connect(
+            lambda: self._selection_panel._on_export_selection("csv")
+        )
+        export_sel_menu.addAction(export_sel_csv_action)
+
         file_menu.addSeparator()
 
         quit_action = QAction("&Quit", self)
@@ -402,6 +363,14 @@ class MainWindow(QMainWindow):
         self._dark_mode_action.triggered.connect(self._on_toggle_dark_mode)
         view_menu.addAction(self._dark_mode_action)
 
+        view_menu.addSeparator()
+
+        compare_action = QAction("&Compare Structures...", self)
+        compare_action.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        compare_action.setStatusTip("Align and compare multiple structures")
+        compare_action.triggered.connect(self._on_compare_structures)
+        view_menu.addAction(compare_action)
+
         # Connect theme manager to update viewer background
         get_theme_manager().add_listener(self._on_theme_changed)
 
@@ -443,13 +412,15 @@ class MainWindow(QMainWindow):
         self._plot_panel.protein_selected.connect(self._on_plot_protein_selected)
 
         # Connect grouping-related signals
-        self._file_list.grouping_mode_changed.connect(self._on_grouping_mode_changed)
         self._selection_panel.binder_search_requested.connect(self._on_binder_search_requested)
         self._selection_panel.binder_result_selected.connect(self._on_binder_result_selected)
         self._selection_panel.binder_group_requested.connect(self._on_binder_group_requested)
         self._selection_panel.create_group_from_chain_requested.connect(
             self._on_create_group_from_chain
         )
+
+        # Connect metrics popout
+        self._metrics_table.popout_requested.connect(self._on_metrics_popout)
 
         # Connect filter changes to save config
         self._metrics_table.filters_changed.connect(self._on_filters_changed)
@@ -578,6 +549,48 @@ class MainWindow(QMainWindow):
                 f"Loaded {self._file_list.file_count} file(s), "
                 f"auto-imported {loaded_count} metrics from JSON"
             )
+
+    def _load_proteins_with_progress(
+        self, file_paths: list[str], label: str = "Loading structures..."
+    ) -> bool:
+        """Load and register all proteins with a progress dialog.
+
+        Skips proteins already registered in the grouping manager.
+
+        Args:
+            file_paths: List of file paths to load.
+            label: Label text for the progress dialog.
+
+        Returns:
+            True if completed, False if cancelled by user.
+        """
+        # Count how many actually need loading
+        to_load = [fp for fp in file_paths if fp not in self._grouping_manager._proteins]
+        if not to_load:
+            return True
+
+        progress = QProgressDialog(label, "Cancel", 0, len(to_load), self)
+        progress.setWindowTitle("Loading")
+        progress.setMinimumDuration(300)  # Only show if takes >300ms
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+
+        for i, fp in enumerate(to_load):
+            if progress.wasCanceled():
+                progress.close()
+                return False
+            progress.setValue(i)
+            progress.setLabelText(f"{label}\n{Path(fp).name}")
+            QApplication.processEvents()
+
+            try:
+                protein = Protein(fp)
+                self._grouping_manager.register_protein(fp, protein)
+            except Exception as e:
+                logger.warning(f"Failed to load {fp}: {e}")
+
+        progress.setValue(len(to_load))
+        progress.close()
+        return True
 
     def _on_structure_loaded(self, file_path: str):
         """Handle successful structure load.
@@ -1301,23 +1314,25 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage("Auto-detecting targets...")
 
         # Load proteins that aren't already registered
-        loaded = []
-        for fp in file_paths:
-            if fp in self._grouping_manager._proteins:
-                loaded.append((fp, self._grouping_manager._proteins[fp]))
-            else:
-                try:
-                    protein = Protein(fp)
-                    self._grouping_manager.register_protein(fp, protein)
-                    loaded.append((fp, protein))
-                except Exception as e:
-                    logger.warning(f"Failed to load {fp} for auto-detection: {e}")
+        if not self._load_proteins_with_progress(file_paths, "Loading structures for auto-detection..."):
+            self._statusbar.showMessage("Auto-detection cancelled")
+            return
+
+        loaded = [
+            (fp, self._grouping_manager._proteins[fp])
+            for fp in file_paths
+            if fp in self._grouping_manager._proteins
+        ]
 
         if len(loaded) < 2:
             QMessageBox.warning(self, "Error", "Could not load enough structures.")
             return
 
-        designations = self._grouping_manager.auto_detect_targets(loaded)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            designations = self._grouping_manager.auto_detect_targets(loaded)
+        finally:
+            QApplication.restoreOverrideCursor()
 
         if not designations:
             QMessageBox.information(
@@ -1358,79 +1373,6 @@ class MainWindow(QMainWindow):
 
     # Grouping handlers
 
-    def _on_grouping_mode_changed(self, mode: str) -> None:
-        """Handle grouping mode change.
-
-        Args:
-            mode: New grouping mode ("none", "sequence", "target").
-        """
-        if mode == "sequence":
-            self._compute_sequence_groups()
-        elif mode == "target":
-            self._grouping_manager.compute_target_groups()
-            self._file_list.refresh_groups()
-
-        self._statusbar.showMessage(f"Grouping mode: {mode}")
-
-    def _compute_sequence_groups(self) -> None:
-        """Compute sequence groups for all proteins in current folder.
-
-        Uses a worker thread to avoid blocking the UI.
-        """
-        if not self._current_folder:
-            return
-
-        file_paths = self._file_list.get_all_file_paths()
-        if not file_paths:
-            return
-
-        # Cancel any existing worker
-        if self._sequence_group_worker is not None:
-            self._sequence_group_worker.cancel()
-            self._sequence_group_worker.wait()
-
-        self._statusbar.showMessage("Computing sequence groups...")
-
-        # Start worker thread
-        self._sequence_group_worker = SequenceGroupWorker(
-            file_paths, self._grouping_manager
-        )
-        self._sequence_group_worker.progress.connect(self._on_sequence_group_progress)
-        self._sequence_group_worker.error.connect(self._on_sequence_group_error)
-        self._sequence_group_worker.finished.connect(self._on_sequence_groups_finished)
-        self._sequence_group_worker.start()
-
-    def _on_sequence_group_progress(self, current: int, total: int, name: str) -> None:
-        """Handle sequence grouping progress.
-
-        Args:
-            current: Current file number.
-            total: Total files.
-            name: Current file name.
-        """
-        self._statusbar.showMessage(f"Computing groups: {current}/{total} - {name}")
-
-    def _on_sequence_group_error(self, file_path: str, message: str) -> None:
-        """Handle sequence grouping error for a file.
-
-        Args:
-            file_path: Path to the file that failed.
-            message: Error message.
-        """
-        logger.warning(f"Failed to load {file_path} for grouping: {message}")
-
-    def _on_sequence_groups_finished(self, proteins: list) -> None:
-        """Handle sequence grouping completion.
-
-        Args:
-            proteins: List of (file_path, Protein) tuples.
-        """
-        self._grouping_manager.compute_sequence_groups(proteins)
-        self._file_list.refresh_groups()
-
-        groups = self._grouping_manager.get_sequence_groups()
-        self._statusbar.showMessage(f"Found {len(groups)} sequence groups from {len(proteins)} structures")
-
     def _on_binder_search_requested(
         self,
         target_residues: list[tuple[str, int]],
@@ -1455,32 +1397,28 @@ class MainWindow(QMainWindow):
             return
 
         # Ensure all proteins are loaded and registered
-        self._statusbar.showMessage(f"Loading {len(file_paths)} structures for search...")
-        QApplication.processEvents()
+        if not self._load_proteins_with_progress(file_paths, "Loading structures for binder search..."):
+            self._statusbar.showMessage("Binder search cancelled")
+            return
 
-        loaded_count = 0
-        for fp in file_paths:
-            if fp not in self._grouping_manager._proteins:
-                try:
-                    protein = Protein(fp)
-                    self._grouping_manager.register_protein(fp, protein)
-                except Exception as e:
-                    logger.warning(f"Failed to load {fp} for binder search: {e}")
-            loaded_count += 1
+        loaded_count = sum(1 for fp in file_paths if fp in self._grouping_manager._proteins)
 
         self._statusbar.showMessage(
             f"Searching {loaded_count} structures for contacts..."
         )
-        QApplication.processEvents()
 
         num_target_residues = len(set(target_residues))
 
-        results = self._grouping_manager.find_binders_contacting_residues(
-            target_residues,
-            cutoff,
-            file_paths=file_paths,
-            min_target_contacts=min_target_contacts,
-        )
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            results = self._grouping_manager.find_binders_contacting_residues(
+                target_residues,
+                cutoff,
+                file_paths=file_paths,
+                min_target_contacts=min_target_contacts,
+            )
+        finally:
+            QApplication.restoreOverrideCursor()
         self._selection_panel.set_binder_search_results(
             results, loaded_count, num_target_residues
         )
@@ -1532,25 +1470,25 @@ class MainWindow(QMainWindow):
             self._selection_panel.set_chain_group_result(0, group_name)
             return
 
-        # Ensure proteins are loaded for searching
+        # Ensure ALL proteins are loaded for searching (bug fix: previously
+        # only the current protein was registered, so unloaded files were skipped)
         file_paths = self._file_list.get_all_file_paths()
-        current_path = (
-            self._current_protein.file_path
-            if hasattr(self._current_protein, "file_path")
-            else None
-        )
 
-        # Register current protein if not already
-        if current_path and current_path not in self._grouping_manager._proteins:
-            self._grouping_manager.register_protein(current_path, self._current_protein)
+        if not self._load_proteins_with_progress(file_paths, "Loading structures for chain search..."):
+            self._statusbar.showMessage("Chain search cancelled")
+            return
 
         # Use the grouping manager to create the group
-        group = self._grouping_manager.create_group_from_chain_search(
-            name=group_name,
-            reference_protein=self._current_protein,
-            chain_id=chain_id,
-            file_paths=file_paths,
-        )
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            group = self._grouping_manager.create_group_from_chain_search(
+                name=group_name,
+                reference_protein=self._current_protein,
+                chain_id=chain_id,
+                file_paths=file_paths,
+            )
+        finally:
+            QApplication.restoreOverrideCursor()
 
         if group:
             count = len(group.members)
@@ -1558,12 +1496,90 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage(
                 f"Created group '{group_name}' with {count} structures"
             )
-            # Refresh file list to show custom groups if we add that display later
             self._file_list.refresh_groups()
         else:
             self._selection_panel.set_chain_group_result(0, group_name)
             self._statusbar.showMessage(
                 f"No structures found with matching chain {chain_id}"
+            )
+
+    # Structure comparison handlers
+
+    def _on_compare_structures(self) -> None:
+        """Handle View > Compare Structures action."""
+        if not self._current_protein:
+            QMessageBox.warning(
+                self,
+                "No Structure Loaded",
+                "Please load a reference structure first.",
+            )
+            return
+
+        chains = self._current_protein.get_chains()
+        file_paths = self._file_list.get_all_file_paths()
+
+        dialog = ComparisonDialog(
+            reference_name=self._current_protein.name,
+            chains=chains,
+            grouping_manager=self._grouping_manager,
+            file_list_paths=file_paths,
+            parent=self,
+        )
+
+        if dialog.exec() == dialog.DialogCode.Accepted:
+            self._run_comparison(dialog)
+
+    def _run_comparison(self, dialog: ComparisonDialog) -> None:
+        """Execute alignment and send results to the viewer.
+
+        Args:
+            dialog: The comparison dialog with user selections.
+        """
+        align_chain = dialog.align_chain
+        comparison_files = dialog.comparison_files
+        colors = dialog.get_comparison_colors()
+
+        if not comparison_files:
+            return
+
+        # Clear previous comparison models
+        self._viewer.clear_comparison_models()
+
+        results = []
+        for i, file_path in enumerate(comparison_files):
+            name = Path(file_path).stem
+            color = colors[i] if i < len(colors) else "#808080"
+
+            try:
+                mobile = Protein(file_path)
+                pdb_text, rmsd = mobile.get_aligned_pdb_text(
+                    self._current_protein, align_chain
+                )
+                self._viewer.add_comparison_structure(name, color, pdb_text)
+                results.append({"name": name, "rmsd": rmsd})
+                logger.info(f"Aligned {name} on chain {align_chain}: RMSD={rmsd:.3f}")
+            except Exception as e:
+                results.append({"name": name, "error": str(e)})
+                logger.warning(f"Failed to align {name}: {e}")
+
+        # Show results summary
+        successful = [r for r in results if "rmsd" in r]
+        failed = [r for r in results if "error" in r]
+
+        msg = f"Aligned {len(successful)} of {len(results)} structures on chain {align_chain}"
+        if failed:
+            msg += f" ({len(failed)} failed)"
+        self._statusbar.showMessage(msg)
+
+        # Re-open dialog with results if there were failures
+        if failed:
+            error_details = "\n".join(
+                f"  {r['name']}: {r['error']}" for r in failed
+            )
+            QMessageBox.warning(
+                self,
+                "Alignment Issues",
+                f"{len(failed)} structure(s) failed to align:\n{error_details}",
             )
 
     # Filter persistence handlers
@@ -1581,6 +1597,43 @@ class MainWindow(QMainWindow):
         self._user_config.filters.metric_ranges = filters.copy()
         save_config(self._user_config)
 
+    # Metrics popout handlers
+
+    def _on_metrics_popout(self) -> None:
+        """Toggle metrics table between docked and pop-out window."""
+        if self._metrics_popout is not None:
+            # Dock it back
+            self._dock_metrics()
+            return
+
+        # Pop out: reparent metrics table into a standalone window
+        self._metrics_popout = QMainWindow(self)
+        self._metrics_popout.setWindowTitle("Metrics Table")
+        self._metrics_popout.resize(900, 600)
+        self._metrics_popout.setCentralWidget(self._metrics_table)
+        self._metrics_table.set_popout_button_text("Dock")
+        self._metrics_popout.show()
+
+        # Handle window close: dock back automatically
+        original_close = self._metrics_popout.closeEvent
+
+        def on_popout_close(event):
+            self._dock_metrics()
+            event.accept()
+
+        self._metrics_popout.closeEvent = on_popout_close
+
+    def _dock_metrics(self) -> None:
+        """Re-dock the metrics table into the left tabs."""
+        if self._metrics_popout is None:
+            return
+        self._metrics_popout.setCentralWidget(None)
+        self._left_tabs.insertTab(1, self._metrics_table, "Metrics")
+        self._metrics_table.set_popout_button_text("Pop Out")
+        self._metrics_popout.close()
+        self._metrics_popout.deleteLater()
+        self._metrics_popout = None
+
     def _restore_settings(self) -> None:
         """Restore saved user settings."""
         vc = self._user_config.viewer
@@ -1595,6 +1648,14 @@ class MainWindow(QMainWindow):
 
         # Restore default interface cutoff on selection panel
         self._selection_panel.set_default_cutoff(vc.interface_cutoff)
+
+        # Restore collapsed sections
+        if vc.collapsed_sections:
+            self._selection_panel.set_collapsed_states(vc.collapsed_sections)
+
+        # Restore hidden columns
+        if vc.hidden_columns:
+            self._metrics_table.set_hidden_columns(vc.hidden_columns)
 
         if self._user_config.filters.metric_ranges:
             logger.debug(
@@ -1614,6 +1675,16 @@ class MainWindow(QMainWindow):
         # Save viewer preferences
         self._user_config.viewer.dark_mode = get_theme_manager().is_dark_mode
         self._user_config.viewer.cell_size = self._viewer.sequence_viewer.current_size
+
+        # Save collapsed sections
+        self._user_config.viewer.collapsed_sections = (
+            self._selection_panel.get_collapsed_states()
+        )
+
+        # Save hidden columns
+        self._user_config.viewer.hidden_columns = (
+            self._metrics_table.get_hidden_columns()
+        )
 
         save_config(self._user_config)
         event.accept()
@@ -1655,14 +1726,56 @@ class MainWindow(QMainWindow):
         )
 
         if dialog.exec() == dialog.DialogCode.Accepted:
+            target_chains = dialog.target_chains
+            binder_chains = dialog.binder_chains
+
             self._grouping_manager.set_target_designation(
-                file_path,
-                dialog.target_chains,
-                dialog.binder_chains,
+                file_path, target_chains, binder_chains,
             )
 
-            # Recompute target groups if in that mode
-            if self._file_list.grouping_mode == "target":
+            if dialog.group_by_target:
+                # Load all proteins and find those sharing the target sequence
+                all_file_paths = self._file_list.get_all_file_paths()
+
+                if not self._load_proteins_with_progress(
+                    all_file_paths, "Loading structures for target matching..."
+                ):
+                    # Cancelled, but single designation was already saved above
+                    self._grouping_manager.compute_target_groups()
+                    self._file_list.refresh_groups()
+                    return True
+
+                # Find structures sharing the target chain sequences
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                try:
+                    ref_protein = self._grouping_manager._proteins.get(file_path)
+                    if ref_protein:
+                        for target_chain in target_chains:
+                            matches = self._grouping_manager.find_structures_with_chain_sequence(
+                                ref_protein, target_chain, all_file_paths
+                            )
+                            # Set designation for matching structures that don't have one
+                            for match_path in matches:
+                                if match_path == file_path:
+                                    continue
+                                if not self._grouping_manager.has_designation(match_path):
+                                    self._grouping_manager.set_target_designation(
+                                        match_path, target_chains, binder_chains,
+                                    )
+
+                    # Compute target groups and refresh tree
+                    self._grouping_manager.compute_target_groups()
+                finally:
+                    QApplication.restoreOverrideCursor()
+
+                self._file_list.refresh_groups()
+
+                target_groups = self._grouping_manager.get_target_groups()
+                self._statusbar.showMessage(
+                    f"Grouped structures into {len(target_groups)} target group(s)"
+                )
+            else:
+                # Just recompute groups (designation was added, tree may need update)
                 self._grouping_manager.compute_target_groups()
                 self._file_list.refresh_groups()
 

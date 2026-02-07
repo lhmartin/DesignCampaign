@@ -193,6 +193,14 @@ class TargetDesignationDialog(QDialog):
         )
         layout.addWidget(self._remember_checkbox)
 
+        # Group by target option
+        self._group_by_target_checkbox = QCheckBox("Find all structures with this target")
+        self._group_by_target_checkbox.setToolTip(
+            "Search all structures in the folder for matching target chain sequence and group them together"
+        )
+        self._group_by_target_checkbox.setChecked(True)
+        layout.addWidget(self._group_by_target_checkbox)
+
         # Buttons
         button_layout = QHBoxLayout()
         button_layout.addStretch()
@@ -262,6 +270,11 @@ class TargetDesignationDialog(QDialog):
     def remember_for_similar(self) -> bool:
         """Check if the user wants to remember this designation."""
         return self._remember_checkbox.isChecked()
+
+    @property
+    def group_by_target(self) -> bool:
+        """Check if the user wants to group all structures with this target."""
+        return self._group_by_target_checkbox.isChecked()
 
     @property
     def file_path(self) -> str:

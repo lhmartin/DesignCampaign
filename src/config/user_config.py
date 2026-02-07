@@ -122,6 +122,8 @@ class ViewerConfig:
     representation: str = "cartoon"
     interface_cutoff: float = 4.0
     dark_mode: bool = False
+    collapsed_sections: dict[str, bool] = field(default_factory=dict)
+    hidden_columns: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -170,6 +172,8 @@ def save_config(config: UserConfig) -> bool:
                 "representation": config.viewer.representation,
                 "interface_cutoff": config.viewer.interface_cutoff,
                 "dark_mode": config.viewer.dark_mode,
+                "collapsed_sections": config.viewer.collapsed_sections,
+                "hidden_columns": config.viewer.hidden_columns,
             },
             "last_folder": config.last_folder,
             "window_geometry": config.window_geometry,
@@ -213,6 +217,8 @@ def load_config() -> UserConfig:
             representation=viewer_data.get("representation", "cartoon"),
             interface_cutoff=viewer_data.get("interface_cutoff", 4.0),
             dark_mode=viewer_data.get("dark_mode", False),
+            collapsed_sections=viewer_data.get("collapsed_sections", {}),
+            hidden_columns=viewer_data.get("hidden_columns", []),
         )
 
         return UserConfig(
