@@ -1,0 +1,33 @@
+/* Mol* style overrides — isolate inside .msp-plugin to avoid conflicts with app styles */
+
+.msp-plugin {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Hide Mol* default UI panels (we use our own controls) */
+.msp-plugin .msp-layout-region-top,
+.msp-plugin .msp-layout-region-left,
+.msp-plugin .msp-layout-region-right {
+  display: none !important;
+}
+
+/* Hide Mol* viewport overlay controls (Reset Zoom, Fullscreen, etc.) */
+.msp-plugin .msp-viewport-controls {
+  display: none !important;
+}
+
+/* Allow Mol* sequence viewer at bottom if enabled */
+.msp-plugin .msp-layout-region-bottom {
+  max-height: 120px;
+  overflow: hidden;
+}
+
+/* Mol* canvas takes all available space */
+.msp-plugin canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}

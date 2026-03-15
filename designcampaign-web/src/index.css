@@ -1,0 +1,52 @@
+/* ── Global reset for Electron app ───────────────────────────────────────── */
+/* index.html already pins html/body/#root to 100%/overflow:hidden via
+   inline <style>. This file handles typography, theming, and component
+   defaults only — NO flex centering or min-height that would fight the
+   layout. */
+
+:root {
+  font-family: 'Outfit', 'JetBrains Mono', system-ui, sans-serif;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Reset Vite's opinionated button/a defaults */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  border-radius: 0;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  background: none;
+  cursor: pointer;
+}

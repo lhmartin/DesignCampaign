@@ -1,0 +1,110 @@
+@import "tailwindcss";
+@import "./molstar-overrides.css";
+
+@theme {
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* ── Light theme (default) ── */
+  --color-background:       #f2f5fb;
+  --color-foreground:       #111827;
+  --color-secondary-bg:     #ffffff;
+  --color-border:           #d0d8ec;
+  --color-accent:           #0068c8;
+  --color-accent-hover:     #0057a8;
+  --color-text-primary:     #111827;
+  --color-text-secondary:   #4a607c;
+  --color-text-disabled:    #8fa3bc;
+  --color-viewer-bg:        #ffffff;
+  --color-table-alt-row:    #f6f8fd;
+  --color-table-header:     #e8edf8;
+
+  --color-card:             #ffffff;
+  --color-card-foreground:  #111827;
+  --color-popover:          #ffffff;
+  --color-popover-foreground: #111827;
+  --color-primary:          #0068c8;
+  --color-primary-foreground: #ffffff;
+  --color-secondary:        #f2f5fb;
+  --color-secondary-foreground: #111827;
+  --color-muted:            #f2f5fb;
+  --color-muted-foreground: #4a607c;
+  --color-destructive:      #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-input:            #d0d8ec;
+  --color-ring:             #0068c8;
+  --radius:                 0.4rem;
+}
+
+:root {
+  color-scheme: light;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ── Dark theme ─────────────────────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
+  --color-background:       #151b2e;
+  --color-foreground:       #c4d4ec;
+  --color-secondary-bg:     #1c2340;
+  --color-border:           #2e3f64;
+  --color-accent:           #00c8a8;
+  --color-accent-hover:     #00b096;
+  --color-text-primary:     #c4d4ec;
+  --color-text-secondary:   #627eaa;
+  --color-text-disabled:    #3d5070;
+  --color-viewer-bg:        #0c1120;
+  --color-table-alt-row:    #1c2340;
+  --color-table-header:     #222e4a;
+
+  --color-card:             #1c2340;
+  --color-card-foreground:  #c4d4ec;
+  --color-popover:          #1c2340;
+  --color-popover-foreground: #c4d4ec;
+  --color-primary:          #00c8a8;
+  --color-primary-foreground: #0c1120;
+  --color-secondary:        #1e2a44;
+  --color-secondary-foreground: #c4d4ec;
+  --color-muted:            #1e2a44;
+  --color-muted-foreground: #627eaa;
+  --color-destructive:      #f87171;
+  --color-destructive-foreground: #0c1120;
+  --color-input:            #2e3f64;
+  --color-ring:             #00c8a8;
+
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Smooth theme transitions */
+*, *::before, *::after {
+  transition-property: background-color, border-color, color;
+  transition-duration: 100ms;
+  transition-timing-function: ease;
+}
+
+/* Thin, clean scrollbars */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-disabled); }
+
+/* Custom select arrow */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b8db5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  padding-right: 18px !important;
+}

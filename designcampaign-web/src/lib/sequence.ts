@@ -1,0 +1,55 @@
+// ─── Amino-acid sequence types & helpers ─────────────────────────────────────
+
+export interface ResidueInfo {
+  code: string   // single-letter IUPAC code
+  number: number // auth_seq_id from structure
+}
+
+export interface ChainSequence {
+  chain: string
+  residues: ResidueInfo[]
+}
+
+// 3-letter → 1-letter mapping (standard + common non-standard)
+export const THREE_TO_ONE: Record<string, string> = {
+  ALA: 'A', ARG: 'R', ASN: 'N', ASP: 'D', CYS: 'C',
+  GLN: 'Q', GLU: 'E', GLY: 'G', HIS: 'H', ILE: 'I',
+  LEU: 'L', LYS: 'K', MET: 'M', PHE: 'F', PRO: 'P',
+  SER: 'S', THR: 'T', TRP: 'W', TYR: 'Y', VAL: 'V',
+  // Non-standard
+  MSE: 'M', SEC: 'U', PYL: 'O', HYP: 'P',
+  // Nucleotides (fall through gracefully)
+  DA: 'A', DC: 'C', DG: 'G', DT: 'T', DU: 'U',
+  A: 'A', C: 'C', G: 'G', T: 'T', U: 'U',
+}
+
+// ─── Kyte-Doolittle hydrophobicity scale ─────────────────────────────────────
+export const HYDROPHOBICITY_SCALE: Record<string, number> = {
+  I: 4.5, V: 4.2, L: 3.8, F: 2.8, C: 2.5, M: 1.9, A: 1.8,
+  G: -0.4, T: -0.7, S: -0.8, W: -0.9, Y: -1.3, P: -1.6, H: -3.2,
+  D: -3.5, E: -3.5, N: -3.5, Q: -3.5, K: -3.9, R: -4.5,
+}
+
+// ─── Residue color palette ────────────────────────────────────────────────────
+export function residueColor(code: string): { bg: string; fg: string } {
+  switch (code) {
+    // Hydrophobic (non-polar aliphatic + aromatic)
+    case 'A': case 'V': case 'I': case 'L': case 'M':
+    case 'F': case 'W': case 'P':
+      return { bg: 'rgba(255,155,60,0.22)', fg: '#ff9e50' }
+    // Polar uncharged
+    case 'S': case 'T': case 'N': case 'Q': case 'C': case 'Y':
+      return { bg: 'rgba(72,200,110,0.20)', fg: '#52d080' }
+    // Positively charged
+    case 'K': case 'R': case 'H':
+      return { bg: 'rgba(80,140,255,0.20)', fg: '#7aaeff' }
+    // Negatively charged
+    case 'D': case 'E':
+      return { bg: 'rgba(255,80,80,0.20)', fg: '#ff7070' }
+    // Glycine — flexible
+    case 'G':
+      return { bg: 'rgba(160,160,180,0.16)', fg: '#a0a0b8' }
+    default:
+      return { bg: 'rgba(120,120,140,0.12)', fg: '#888898' }
+  }
+}

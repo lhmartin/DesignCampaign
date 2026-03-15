@@ -1,0 +1,733 @@
+import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react'
+import { useMolstar } from './hooks/useMolstar'
+import { ViewerControls, type RepresentationStyle, type ColorScheme } from './ViewerControls'
+import { SequenceViewer } from './SequenceViewer'
+import { useSelectionStore } from '@/stores/selection-store'
+import { useComparisonStore } from '@/stores/comparison-store'
+import { readFileContent } from '@/lib/fsa'
+import { type ChainSequence, THREE_TO_ONE } from '@/lib/sequence'
+
+type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
+
+const STYLE_MAP: Record<RepresentationStyle, string> = {
+  cartoon: 'cartoon',
+  'ball-and-stick': 'ball-and-stick',
+  spacefill: 'spacefill',
+  line: 'line',
+  'gaussian-surface': 'gaussian-surface',
+}
+
+export interface MolstarViewerHandle {
+  loadFromFile: (filePath: string) => Promise<void>
+  loadAsComparison: (filePath: string) => Promise<void>
+  getPlugin: () => PluginUIContext | null
+}
+
+interface MolstarViewerProps {
+  onStructureLoaded?: (filePath: string) => void
+  onError?: (error: string) => void
+}
+
+// ─── Comparison overlay icon ──────────────────────────────────────────────────
+
+function IconLayers({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+      <rect x="1" y="4" width="8" height="7" rx="1" stroke="currentColor" strokeWidth="1.2"/>
+      <rect x="5" y="2" width="8" height="7" rx="1" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2.5 1.5"/>
+      <line x1="1" y1="4" x2="5" y2="2" stroke="currentColor" strokeWidth="1.1"/>
+      <line x1="9" y1="4" x2="13" y2="2" stroke="currentColor" strokeWidth="1.1"/>
+    </svg>
+  )
+}
+
+// ─── Inline CompareMenu (no circular imports — uses plugin prop directly) ─────
+
+function CompareMenu({ plugin }: { plugin: PluginUIContext }) {
+  const { entries, updateEntry, removeEntry } = useComparisonStore()
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const alignEntry = async (id: string) => {
+    const state = useComparisonStore.getState()
+    const entry = state.entries.find(e => e.id === id)
+    if (!entry) return
+    setBusy(true)
+    try {
+      const { MinimizeRmsd } = await import('molstar/lib/mol-math/linear-algebra/3d/minimize-rmsd') as any
+      const structures = plugin.managers.structure.hierarchy.current.structures
+      if (structures.length < 2) return
+      const entryIdx = state.entries.indexOf(entry)
+      const mobileIdx = Math.min(entryIdx + 1, structures.length - 1)
+      const fixed  = (structures[0].cell.obj as any)?.data
+      const mobile = (structures[mobileIdx].cell.obj as any)?.data
+      if (!fixed || !mobile) return
+      const posA = extractCAPositions(fixed)
+      const posB = extractCAPositions(mobile)
+      const len = Math.min(posA.x.length, posB.x.length)
+      if (len === 0) return
+      const aPos = { x: posA.x.slice(0, len), y: posA.y.slice(0, len), z: posA.z.slice(0, len) }
+      const bPos = { x: posB.x.slice(0, len), y: posB.y.slice(0, len), z: posB.z.slice(0, len) }
+      const result = MinimizeRmsd.compute(aPos, bPos)
+      const { StateTransforms } = await import('molstar/lib/mol-plugin-state/transforms') as any
+      const update = plugin.state.data.build()
+        .to(structures[mobileIdx].cell.transform.ref)
+        .update(StateTransforms.Model.TransformStructureConformation, (p: any) => ({
+          ...p,
+          transform: { name: 'matrix', params: { data: Array.from(result.bTransform), transpose: false } },
+        }))
+      await plugin.runTask(plugin.state.data.updateTree(update))
+      updateEntry(id, { rmsd: result.rmsd as number })
+    } catch { /* best effort */ }
+    finally { setBusy(false) }
+  }
+
+  const toggleVisible = (id: string) => {
+    const state = useComparisonStore.getState()
+    const entry = state.entries.find(e => e.id === id)
+    if (!entry) return
+    const entryIdx = state.entries.indexOf(entry)
+    const structures = plugin.managers.structure.hierarchy.current.structures
+    const mobileIdx = Math.min(entryIdx + 1, structures.length - 1)
+    if (mobileIdx <= 0 || mobileIdx >= structures.length) return
+    for (const comp of structures[mobileIdx].components) {
+      for (const repr of comp.representations ?? []) {
+        plugin.state.data.updateCellState(repr.cell.transform.ref, { isHidden: entry.visible })
+      }
+    }
+    updateEntry(id, { visible: !entry.visible })
+  }
+
+  const removeComparison = async (id: string) => {
+    const state = useComparisonStore.getState()
+    const entry = state.entries.find(e => e.id === id)
+    if (!entry) return
+    try {
+      const entryIdx = state.entries.indexOf(entry)
+      const structures = plugin.managers.structure.hierarchy.current.structures
+      const mobileIdx = Math.min(entryIdx + 1, structures.length - 1)
+      if (mobileIdx > 0 && mobileIdx < structures.length) {
+        await plugin.managers.structure.hierarchy.remove([structures[mobileIdx]])
+      }
+    } catch { /* ignore */ }
+    removeEntry(id)
+  }
+
+  const smallBtn: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: '2px 6px', borderRadius: 4, fontSize: 9,
+    border: '1px solid var(--color-border)', background: 'transparent',
+    color: 'var(--color-text-secondary)', cursor: 'pointer',
+    flexShrink: 0,
+  }
+
+  return (
+    <div ref={panelRef} style={{ position: 'relative', flexShrink: 0 }}>
+
+      {/* Trigger button — lives in the toolbar row */}
+      <button
+        onClick={() => setOpen(p => !p)}
+        title="Overlay structures for comparison"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 5,
+          height: 38,
+          padding: '0 10px',
+          border: 'none',
+          borderLeft: '1px solid var(--color-border)',
+          borderBottom: '1px solid var(--color-border)',
+          background: entries.length > 0
+            ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)'
+            : 'var(--color-secondary-bg)',
+          color: entries.length > 0 ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+          cursor: 'pointer',
+          fontSize: 10,
+          fontFamily: 'Outfit, sans-serif',
+        }}
+      >
+        <IconLayers />
+        {entries.length > 0 && (
+          <span style={{
+            background: 'var(--color-accent)',
+            color: 'var(--color-secondary-bg)',
+            borderRadius: 8,
+            padding: '0 4px',
+            fontSize: 9,
+            fontWeight: 700,
+            lineHeight: '14px',
+          }}>
+            {entries.length}
+          </span>
+        )}
+      </button>
+
+      {/* Dropdown panel */}
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 2px)',
+          right: 0,
+          zIndex: 200,
+          background: 'var(--color-secondary-bg)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          width: 290,
+          maxHeight: 380,
+          overflow: 'auto',
+        }}>
+
+          {entries.length === 0 ? (
+            /* Empty hint */
+            <div style={{
+              padding: '20px 16px',
+              textAlign: 'center',
+              color: 'var(--color-text-disabled)',
+              lineHeight: 1.7,
+            }}>
+              <div style={{ fontSize: 22, marginBottom: 8 }}>🔬</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
+                Overlay structures
+              </div>
+              <div style={{ fontSize: 10 }}>
+                <kbd style={{
+                  padding: '1px 5px',
+                  borderRadius: 3,
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-background)',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: 9,
+                }}>Ctrl</kbd>
+                {' '}+ click any file to add an overlay, then{' '}
+                <strong style={{ color: 'var(--color-text-primary)' }}>Align</strong>
+                {' '}to superimpose by Cα atoms.
+              </div>
+            </div>
+          ) : (
+            /* Entry list */
+            <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {entries.map(entry => (
+                <div
+                  key={entry.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '5px 8px',
+                    borderRadius: 6,
+                    background: 'var(--color-background)',
+                    border: '1px solid var(--color-border)',
+                  }}
+                >
+                  {/* Color swatch */}
+                  <span style={{
+                    width: 10, height: 10, borderRadius: 2, flexShrink: 0,
+                    background: `#${entry.color.toString(16).padStart(6, '0')}`,
+                    border: '1px solid rgba(0,0,0,0.15)',
+                  }} />
+
+                  {/* Name */}
+                  <span style={{
+                    flex: 1, fontSize: 10,
+                    fontFamily: 'JetBrains Mono, monospace',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    color: 'var(--color-text-primary)',
+                  }}>
+                    {entry.name}
+                  </span>
+
+                  {/* RMSD badge */}
+                  {entry.rmsd !== null ? (
+                    <span style={{
+                      fontSize: 9, fontFamily: 'JetBrains Mono, monospace', flexShrink: 0,
+                      background: 'color-mix(in srgb, var(--color-accent) 15%, transparent)',
+                      color: 'var(--color-accent)',
+                      padding: '1px 5px', borderRadius: 8,
+                    }}>
+                      {entry.rmsd.toFixed(2)} Å
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 9, color: 'var(--color-text-disabled)', flexShrink: 0 }}>—</span>
+                  )}
+
+                  {/* Align */}
+                  <button
+                    onClick={() => alignEntry(entry.id)}
+                    disabled={busy}
+                    title="Superimpose Cα atoms and compute RMSD"
+                    style={smallBtn}
+                  >
+                    Align
+                  </button>
+
+                  {/* Visibility */}
+                  <button
+                    onClick={() => toggleVisible(entry.id)}
+                    disabled={busy}
+                    title={entry.visible ? 'Hide' : 'Show'}
+                    style={{ ...smallBtn, padding: '2px 5px' }}
+                  >
+                    {entry.visible ? '👁' : '◌'}
+                  </button>
+
+                  {/* Remove */}
+                  <button
+                    onClick={() => removeComparison(entry.id)}
+                    disabled={busy}
+                    title="Remove overlay"
+                    style={{ ...smallBtn, padding: '2px 5px', color: 'var(--color-text-disabled)' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+
+              {/* Footer hint */}
+              <div style={{
+                fontSize: 9, color: 'var(--color-text-disabled)',
+                padding: '4px 4px 0',
+                lineHeight: 1.5,
+              }}>
+                <kbd style={{
+                  padding: '0 3px', borderRadius: 2,
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-background)',
+                  fontFamily: 'JetBrains Mono, monospace',
+                }}>Ctrl</kbd>
+                {' '}+ click more files in the sidebar to add overlays.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>(
+  function MolstarViewer({ onStructureLoaded, onError }, ref) {
+    const containerRef = useRef<HTMLDivElement>(null)
+    const { plugin, isLoading, error, setIsLoading } = useMolstar(containerRef)
+    const [style, setStyle] = useState<RepresentationStyle>('cartoon')
+    const [colorScheme, setColorScheme] = useState<ColorScheme>('sequence-id')
+    const [cameraMode, setCameraMode] = useState<'perspective' | 'orthographic'>('perspective')
+    const [viewerBg, setViewerBg] = useState<'dark' | 'light'>('dark')
+    const [spinning, setSpinning] = useState(false)
+    const [spinSpeed, setSpinSpeed] = useState(0.2) // 1 rotation every 5s
+    const [showAO, setShowAO] = useState(false)
+    const [sequence, setSequence] = useState<ChainSequence[]>([])
+    const [residueValues, setResidueValues] = useState<Map<string, number>>(new Map())
+    const { toggleResidue, addResidue, clearSelection } = useSelectionStore()
+
+    // Subscribe to Mol* state changes to extract sequence automatically.
+    // Debounced: applyPreset fires many intermediate state events — wait for them to settle.
+    useEffect(() => {
+      if (!plugin) return
+      let timer: ReturnType<typeof setTimeout>
+      const sub = plugin.state.data.events.changed.subscribe(() => {
+        clearTimeout(timer)
+        timer = setTimeout(() => {
+          const { seq, values } = extractSequenceFromPlugin(plugin)
+          setSequence(seq)
+          setResidueValues(values)
+        }, 250)
+      })
+      return () => { sub.unsubscribe(); clearTimeout(timer) }
+    }, [plugin])
+
+    useImperativeHandle(ref, () => ({
+      loadFromFile: async (filePath: string) => {
+        if (!plugin) { onError?.('Mol* viewer not initialized'); return }
+        useComparisonStore.getState().clearAll()
+        await loadStructureFromFile(plugin, filePath, setIsLoading, onStructureLoaded, onError)
+        setStyle('cartoon')
+        setColorScheme('sequence-id')
+        clearSelection()
+      },
+      loadAsComparison: async (filePath: string) => {
+        if (!plugin) { onError?.('Mol* viewer not initialized'); return }
+        await loadComparisonFromFile(plugin, filePath, onError)
+      },
+      getPlugin: () => plugin,
+    }), [plugin, onStructureLoaded, onError, setIsLoading, clearSelection])
+
+    useEffect(() => {
+      if (!plugin) return
+      applyStyle(plugin, style).catch(console.error)
+    }, [plugin, style])
+
+    useEffect(() => {
+      if (!plugin) return
+      applyColorScheme(plugin, colorScheme).catch(console.error)
+    }, [plugin, colorScheme])
+
+    useEffect(() => {
+      if (!plugin?.canvas3d) return
+      try { (plugin.canvas3d as any).setProps({ camera: { mode: cameraMode } }) } catch { /* best effort */ }
+    }, [plugin, cameraMode])
+
+    useEffect(() => {
+      if (!plugin?.canvas3d) return
+      const bg = viewerBg === 'dark' ? 0x040812 : 0xffffff
+      try { (plugin.canvas3d as any).setProps({ renderer: { backgroundColor: bg } }) } catch { /* best effort */ }
+    }, [plugin, viewerBg])
+
+    useEffect(() => {
+      if (!plugin?.canvas3d) return
+      try {
+        (plugin.canvas3d as any).setProps({
+          trackball: {
+            animate: spinning
+              ? { name: 'spin', params: { speed: spinSpeed, axis: [0, -1, 0] } }
+              : { name: 'off', params: {} },
+          },
+        })
+      } catch { /* best effort */ }
+    }, [plugin, spinning, spinSpeed])
+
+    useEffect(() => {
+      if (!plugin?.canvas3d) return
+      try {
+        (plugin.canvas3d as any).setProps({
+          postprocessing: {
+            occlusion: showAO
+              ? { name: 'on', params: { bias: 0.8, blurKernelSize: 15, radius: 5, samples: 32, resolutionScale: 1 } }
+              : { name: 'off', params: {} },
+          },
+        })
+      } catch { /* best effort */ }
+    }, [plugin, showAO])
+
+    useEffect(() => {
+      if (!plugin) return
+      const sub = plugin.behaviors.interaction.click.subscribe(async ({ current, modifiers }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { StructureElement, StructureProperties } = await import('molstar/lib/mol-model/structure') as any
+        if (!StructureElement.Loci.is(current.loci)) {
+          if (!modifiers?.control) clearSelection()
+          return
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const loci = current.loci as any
+        if (!modifiers?.control) clearSelection()
+        const { OrderedSet } = await import('molstar/lib/mol-data/int') as any
+        for (const { unit, indices } of loci.elements) {
+          const l = StructureElement.Location.create(loci.structure)
+          OrderedSet.forEach(indices, (idx: number) => {
+            StructureElement.Location.set(l, loci.structure, unit, (unit as any).elements[idx])
+            const chainId = StructureProperties.chain.auth_asym_id(l)
+            const resId = StructureProperties.residue.auth_seq_id(l)
+            if (modifiers?.control) toggleResidue(chainId, resId)
+            else addResidue(chainId, resId)
+          })
+        }
+      })
+      return () => sub.unsubscribe()
+    }, [plugin, addResidue, toggleResidue, clearSelection])
+
+    useEffect(() => {
+      if (error) onError?.(error)
+    }, [error, onError])
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+
+        {/* ── Toolbar row: ViewerControls + CompareMenu ── */}
+        {plugin && (
+          <div style={{ display: 'flex', alignItems: 'stretch', flexShrink: 0 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <ViewerControls
+                style={style}
+                colorScheme={colorScheme}
+                cameraMode={cameraMode}
+                viewerBg={viewerBg}
+                spinning={spinning}
+                spinSpeed={spinSpeed}
+                showAO={showAO}
+                onStyleChange={setStyle}
+                onColorChange={setColorScheme}
+                onCameraModeChange={setCameraMode}
+                onViewerBgChange={setViewerBg}
+                onSpinChange={setSpinning}
+                onSpinSpeedChange={setSpinSpeed}
+                onAOChange={setShowAO}
+                onResetView={() => { try { (plugin as any).managers.camera.reset() } catch { /* best effort */ } }}
+              />
+            </div>
+            <CompareMenu plugin={plugin} />
+          </div>
+        )}
+
+        {/* ── Sequence strip ── */}
+        {sequence.length > 0 && (
+          <SequenceViewer chains={sequence} plugin={plugin} residueValues={residueValues} />
+        )}
+
+        {/* ── 3D canvas ── */}
+        <div style={{ flex: 1, position: 'relative', minHeight: 0, background: 'var(--color-viewer-bg)' }}>
+          <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+
+          {isLoading && (
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(0,0,0,0.2)', pointerEvents: 'none', zIndex: 20,
+            }}>
+              <span style={{
+                fontSize: 11, color: '#fff',
+                background: 'rgba(0,0,0,0.5)', padding: '3px 10px', borderRadius: 4,
+              }}>Loading…</span>
+            </div>
+          )}
+
+          {!plugin && !error && (
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              pointerEvents: 'none',
+            }}>
+              <span style={{ fontSize: 11, color: 'var(--color-text-disabled)' }}>
+                Initializing viewer…
+              </span>
+            </div>
+          )}
+
+          {error && (
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              pointerEvents: 'none',
+            }}>
+              <span style={{ fontSize: 11, color: '#f87171', textAlign: 'center', padding: '0 16px' }}>
+                {error}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+)
+
+// ─── CA positions helper (shared by CompareMenu & sequence extraction) ────────
+
+function extractCAPositions(structure: any): { x: number[]; y: number[]; z: number[] } {
+  const x: number[] = [], y: number[] = [], z: number[] = []
+  try {
+    for (const unit of structure.units) {
+      if (unit.kind !== 0) continue
+      const { atoms } = unit.model.atomicHierarchy
+      const conf = unit.model.atomicConformation
+      for (let i = 0; i < unit.elements.length; i++) {
+        const idx = unit.elements[i]
+        if (atoms.auth_atom_id.value(idx) === 'CA') {
+          x.push(conf.x[idx]); y.push(conf.y[idx]); z.push(conf.z[idx])
+        }
+      }
+    }
+  } catch { /* gracefully return whatever we have */ }
+  return { x, y, z }
+}
+
+// ─── Sequence extraction from loaded Mol* plugin ──────────────────────────────
+
+function extractSequenceFromPlugin(plugin: PluginUIContext): { seq: ChainSequence[], values: Map<string, number> } {
+  const empty = { seq: [] as ChainSequence[], values: new Map<string, number>() }
+  try {
+    const structures = plugin.managers.structure.hierarchy.current.structures
+    if (structures.length === 0) return empty
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const structure = (structures[0].cell.obj as any)?.data
+    if (!structure) return empty
+
+    const chainMap = new Map<string, Map<number, string>>()
+    const values = new Map<string, number>()
+
+    for (const unit of structure.units as any[]) {
+      if (unit.kind !== 0) continue
+      const hierarchy = unit.model?.atomicHierarchy
+      const conf      = unit.model?.atomicConformation
+      // Verify all required columns exist before touching the loop
+      const atomIdCol    = hierarchy?.atoms?.auth_atom_id
+      const atomCompCol  = hierarchy?.atoms?.auth_comp_id
+      const resSeqCol    = hierarchy?.residues?.auth_seq_id
+      const chainAsymCol = hierarchy?.chains?.auth_asym_id
+      const resAtomSeg   = hierarchy?.residueAtomSegments
+      const chainAtomSeg = hierarchy?.chainAtomSegments
+      if (!atomIdCol?.value || !atomCompCol?.value || !resSeqCol?.value
+          || !chainAsymCol?.value || !resAtomSeg?.index || !chainAtomSeg?.index) continue
+
+      const elements: ArrayLike<number> = unit.elements
+      for (let i = 0; i < elements.length; i++) {
+        try {
+          const atomIdx    = elements[i]
+          if (atomIdCol.value(atomIdx) !== 'CA') continue
+          const residueIdx: number = resAtomSeg.index[atomIdx]
+          const resName: string  = atomCompCol.value(atomIdx)
+          const resNum:  number  = resSeqCol.value(residueIdx)
+          const chainIdx: number = chainAtomSeg.index[atomIdx]
+          const chainId:  string = chainAsymCol.value(chainIdx)
+          if (!chainId) continue
+          if (!chainMap.has(chainId)) chainMap.set(chainId, new Map())
+          if (!chainMap.get(chainId)!.has(resNum)) {
+            chainMap.get(chainId)!.set(resNum, THREE_TO_ONE[resName?.toUpperCase() ?? ''] ?? 'X')
+            try {
+              const bfCol = conf?.B_iso_or_equiv
+              const bFactor = typeof bfCol?.value === 'function'
+                ? bfCol.value(atomIdx)
+                : (bfCol as unknown as ArrayLike<number>)?.[atomIdx]
+              if (typeof bFactor === 'number' && isFinite(bFactor)) {
+                values.set(`${chainId}:${resNum}`, bFactor)
+              }
+            } catch { /* B-factor unavailable */ }
+          }
+        } catch { /* skip bad atom */ }
+      }
+    }
+
+    const seq: ChainSequence[] = []
+    for (const [chain, resMap] of chainMap) {
+      const residues = Array.from(resMap.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([number, code]) => ({ code, number }))
+      if (residues.length > 0) seq.push({ chain, residues })
+    }
+    return { seq, values }
+  } catch {
+    return empty
+  }
+}
+
+// ─── Load helpers ─────────────────────────────────────────────────────────────
+
+async function loadStructureFromFile(
+  plugin: PluginUIContext,
+  filePath: string,
+  setIsLoading: (v: boolean) => void,
+  onStructureLoaded?: (path: string) => void,
+  onError?: (err: string) => void,
+): Promise<void> {
+  setIsLoading(true)
+  try {
+    await plugin.clear()
+    const contents = await readFileContent(filePath)
+    const fileName = filePath.split('/').pop() ?? filePath
+    const ext = fileName.slice(fileName.lastIndexOf('.') + 1).toLowerCase()
+    const format = ext === 'cif' || ext === 'mmcif' ? 'mmcif' : 'pdb'
+
+    const data = await plugin.builders.data.rawData({ data: contents, label: fileName })
+    const trajectory = await plugin.builders.structure.parseTrajectory(data, format)
+    await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default')
+
+    onStructureLoaded?.(filePath)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to load structure'
+    onError?.(msg)
+  } finally {
+    setIsLoading(false)
+  }
+}
+
+async function loadComparisonFromFile(
+  plugin: PluginUIContext,
+  filePath: string,
+  onError?: (err: string) => void,
+): Promise<void> {
+  try {
+    const contents = await readFileContent(filePath)
+    const fileName = filePath.split('/').pop() ?? filePath
+    const ext = fileName.slice(fileName.lastIndexOf('.') + 1).toLowerCase()
+    const format = ext === 'cif' || ext === 'mmcif' ? 'mmcif' : 'pdb'
+
+    const { nextColor, addEntry } = useComparisonStore.getState()
+    const color = nextColor()
+
+    const data = await plugin.builders.data.rawData({ data: contents, label: fileName })
+    const trajectory = await plugin.builders.structure.parseTrajectory(data, format)
+    await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default')
+
+    const structures = plugin.managers.structure.hierarchy.current.structures
+    const lastStructure = structures[structures.length - 1]
+    if (lastStructure) {
+      for (const component of lastStructure.components) {
+        for (const repr of component.representations ?? []) {
+          try {
+            const update = plugin.state.data.build()
+              .to(repr.cell)
+              .update((old: Record<string, unknown>) => ({
+                ...old,
+                colorTheme: { name: 'uniform', params: { value: color } },
+                alpha: 0.6,
+              }))
+            await plugin.runTask(plugin.state.data.updateTree(update))
+          } catch { /* skip */ }
+        }
+      }
+    }
+
+    addEntry({
+      id: crypto.randomUUID(),
+      name: fileName,
+      filePath,
+      color,
+      visible: true,
+      rmsd: null,
+      dataRef: null,
+    })
+  } catch (err) {
+    onError?.(err instanceof Error ? err.message : 'Failed to load comparison')
+  }
+}
+
+async function applyStyle(plugin: PluginUIContext, style: RepresentationStyle): Promise<void> {
+  const structures = plugin.managers.structure.hierarchy.current.structures
+  if (structures.length === 0) return
+  const reprType = STYLE_MAP[style]
+  for (const structureRef of structures) {
+    for (const component of structureRef.components) {
+      for (const repr of component.representations ?? []) {
+        try {
+          const update = plugin.state.data.build()
+            .to(repr.cell)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .update((old: any) => ({ ...old, type: { name: reprType, params: {} } }))
+          await plugin.runTask(plugin.state.data.updateTree(update))
+        } catch { /* skip */ }
+      }
+    }
+  }
+}
+
+async function applyColorScheme(plugin: PluginUIContext, scheme: ColorScheme): Promise<void> {
+  const structures = plugin.managers.structure.hierarchy.current.structures
+  if (structures.length === 0) return
+  for (const structureRef of structures) {
+    for (const component of structureRef.components) {
+      for (const repr of component.representations ?? []) {
+        try {
+          const update = plugin.state.data.build()
+            .to(repr.cell)
+            .update((old: Record<string, unknown>) => ({
+              ...old,
+              colorTheme: { name: scheme, params: {} },
+            }))
+          await plugin.runTask(plugin.state.data.updateTree(update))
+        } catch { /* skip */ }
+      }
+    }
+  }
+}
