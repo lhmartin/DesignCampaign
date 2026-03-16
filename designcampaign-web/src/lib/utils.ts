@@ -22,3 +22,13 @@ export function getFileStem(filePath: string): string {
   const name = filePath.split('/').pop()?.split('\\').pop() ?? filePath
   return name.replace(/\.[^.]+$/, '')
 }
+
+/** Trigger a browser download for a string payload. */
+export function downloadBlob(content: string, filename: string, mimeType = 'text/plain'): void {
+  const blob = new Blob([content], { type: mimeType })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}

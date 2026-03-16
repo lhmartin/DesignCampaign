@@ -38,6 +38,8 @@ interface MetricsStore {
   getFilteredRows: () => ProteinMetrics[]
   /** Rename a row in-place.  No-op if oldName not found or newName already exists. */
   renameRow: (oldName: string, newName: string) => void
+  /** Inject a computed column (e.g. rank_score) across all rows, keyed by row name. */
+  injectColumn: (colName: string, values: Map<string, number>) => void
   clearAll: () => void
 }
 
@@ -169,6 +171,15 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
     if (s.rows.some(r => r.name === trimmed)) return {}     // name collision
     return { rows: s.rows.map(r => r.name === oldName ? { ...r, name: trimmed } : r) }
   }),
+  injectColumn: (colName, values) => set(s => ({
+    rows: s.rows.map(r =>
+      values.has(r.name)
+        ? { ...r, metrics: { ...r.metrics, [colName]: values.get(r.name)! } }
+        : r
+    ),
+    allColumns: mergeColumns(s.allColumns, [colName]),
+  })),
+
   clearAll: () => set({ rows: [], allColumns: BUILTIN_COLS, columnRanges: {} }),
 
   addRow: (row) => set(s => ({

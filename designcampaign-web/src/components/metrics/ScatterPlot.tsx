@@ -1,7 +1,9 @@
 import { useEffect, useRef, useMemo, useState, type RefObject } from 'react'
 import { useMetricsStore } from '@/stores/metrics-store'
 import { useFileStore } from '@/stores/file-store'
+import { useFilterStore } from '@/stores/filter-store'
 import type { MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
+import { shortLabel } from '@/lib/metrics-labels'
 
 interface ScatterPlotProps {
   viewerRef: RefObject<MolstarViewerHandle | null>
@@ -21,14 +23,6 @@ function useIsDark(): boolean {
   }, [])
   return isDark
 }
-
-const LABELS: Record<string, string> = {
-  mean_plddt: 'pLDDT',
-  mean_bfactor: 'B-factor',
-  num_residues: 'Residues',
-  chain_count: 'Chains',
-}
-const label = (c: string) => LABELS[c] ?? c.split('.').pop() ?? c
 
 // ── Styled select for the axis choosers ──────────────────────────────────────
 
@@ -74,7 +68,7 @@ function AxisSelect({
         }}
       >
         {options.map(c => (
-          <option key={c} value={c}>{label(c)}</option>
+          <option key={c} value={c}>{shortLabel(c)}</option>
         ))}
       </select>
     </div>
@@ -85,6 +79,7 @@ function AxisSelect({
 
 export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
   const { rows, allColumns, filterText } = useMetricsStore()
+  const { rules: filterRules } = useFilterStore()
   const { files, setActiveFile } = useFileStore()
   const isDark = useIsDark()
 
@@ -141,16 +136,21 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
       },
   [isDark])
 
-  // Memoize traces — only recomputed when data, axes, or theme change
+  // Memoize traces — only recomputed when data, axes, theme, or filter rules change
   const plotSpec = useMemo(() => {
     if (!xAxis || !yAxis || rows.length === 0) return null
 
-    const filtered = filterText
-      ? new Set(rows.filter(r => r.name.toLowerCase().includes(filterText.toLowerCase())).map(r => r.name))
-      : null
+    const hasFilters = !!filterText || filterRules.some(r => r.metric)
 
-    const active  = filtered ? rows.filter(r => filtered.has(r.name))  : rows
-    const dimmed  = filtered ? rows.filter(r => !filtered.has(r.name)) : []
+    const { passesFilters } = useFilterStore.getState()
+    const active = hasFilters
+      ? rows.filter(r => {
+          const textOk = !filterText || r.name.toLowerCase().includes(filterText.toLowerCase())
+          return textOk && passesFilters(r.metrics)
+        })
+      : rows
+    const activeSet = new Set(active)
+    const dimmed = hasFilters ? rows.filter(r => !activeSet.has(r)) : []
 
     const traces: object[] = []
 
@@ -181,8 +181,31 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
       hovertemplate: `<b>%{text}</b><br>${xAxis}: %{x:.3f}<br>${yAxis}: %{y:.3f}<extra></extra>`,
     })
 
+    // ── Filter cutoff lines (on-axis only) ──────────────────────────────────
+    const shapes: object[] = []
+    const lineStyle = { color: 'rgba(248,113,113,0.65)', width: 1.5, dash: 'dash' }
+    for (const rule of filterRules) {
+      if (!rule.metric) continue
+      if (rule.metric === xAxis) {
+        shapes.push({
+          type: 'line',
+          x0: rule.value, x1: rule.value,
+          yref: 'paper', y0: 0, y1: 1,
+          line: lineStyle,
+        })
+      }
+      if (rule.metric === yAxis) {
+        shapes.push({
+          type: 'line',
+          xref: 'paper', x0: 0, x1: 1,
+          y0: rule.value, y1: rule.value,
+          line: lineStyle,
+        })
+      }
+    }
+
     const axis = (titleText: string) => ({
-      title: { text: label(titleText), font: { size: 10, color: theme.font } },
+      title: { text: shortLabel(titleText), font: { size: 10, color: theme.font } },
       tickfont: { size: 9, color: theme.tick },
       gridcolor: theme.grid,
       linecolor: theme.line,
@@ -194,6 +217,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     const layout: object = {
       xaxis: axis(xAxis),
       yaxis: axis(yAxis),
+      shapes,
       margin: { t: 16, r: 16, b: 56, l: 60 },
       showlegend: false,
       paper_bgcolor: theme.paper,
@@ -207,7 +231,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     }
 
     return { traces, layout }
-  }, [rows, xAxis, yAxis, filterText, theme])
+  }, [rows, xAxis, yAxis, filterText, filterRules, theme])
 
   // Always keep a ref to the latest plotSpec so the ResizeObserver can access it
   // without being recreated every time the spec changes.

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useSelectionStore, type SelectionKey } from '@/stores/selection-store'
 import { useFileStore } from '@/stores/file-store'
+import { downloadBlob } from '@/lib/utils'
 
 /** Parse a "chainId:resId" key into its parts. */
 function parseKey(key: SelectionKey): { chain: string; resId: number } {
@@ -34,12 +35,7 @@ export function SelectionPanel() {
     for (const [chain, ids] of byChain) {
       lines.push(`Chain ${chain}: ${ids.join(', ')}`)
     }
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'selection.txt'
-    a.click()
-    URL.revokeObjectURL(a.href)
+    downloadBlob(lines.join('\n'), 'selection.txt')
   }
 
   return (

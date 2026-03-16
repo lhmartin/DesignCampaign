@@ -12,22 +12,8 @@ import { useFileStore } from '@/stores/file-store'
 import { useProteinStore } from '@/stores/protein-store'
 import type { MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
 import { readFileContent } from '@/lib/fsa'
-
-const BUILTIN_LABELS: Record<string, string> = {
-  mean_plddt: 'pLDDT',
-  mean_bfactor: 'B-factor',
-  num_residues: 'Residues',
-  chain_count: 'Chains',
-}
-
-/**
- * Display label for a column key.
- * Built-in columns use their friendly name; sidecar columns with deep dot-notation
- * paths (e.g. "payload.job_status.response_payload.plddt") show only the last segment.
- */
-function shortLabel(col: string): string {
-  return BUILTIN_LABELS[col] ?? col.split('.').pop() ?? col
-}
+import { BUILTIN_LABELS, shortLabel } from '@/lib/metrics-labels'
+import { downloadBlob } from '@/lib/utils'
 
 const helper = createColumnHelper<ProteinMetrics>()
 
@@ -216,7 +202,7 @@ function ColumnsDropdown({
                   color: visible ? 'var(--color-text-primary)' : 'var(--color-text-disabled)',
                   userSelect: 'none',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-accent-subtle, rgba(0,200,168,0.08))')}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-accent-subtle)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'none')}
               >
                 <input
@@ -337,13 +323,7 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
   }
 
   const handleExport = () => {
-    const csv = exportCSV()
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'metrics.csv'
-    a.click()
-    URL.revokeObjectURL(a.href)
+    downloadBlob(exportCSV(), 'metrics.csv', 'text/csv')
   }
 
   const handleCalculate = () => {
@@ -417,7 +397,7 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
           </div>
         ) : (
           <table className="w-full border-collapse text-xs">
-            <thead className="sticky top-0 bg-[var(--color-secondary-bg)] z-10">
+            <thead className="sticky top-0 bg-[var(--color-table-header)] z-10">
               {table.getHeaderGroups().map(hg => (
                 <tr key={hg.id} className="border-b border-[var(--color-border)]">
                   {hg.headers.map(header => (
@@ -442,7 +422,7 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
                 <tr
                   key={row.id}
                   onDoubleClick={() => handleDoubleClick(row.original)}
-                  className={`border-b border-[var(--color-border)] cursor-pointer hover:bg-[var(--color-accent)]/10 ${i % 2 === 0 ? '' : 'bg-[var(--color-secondary-bg)]/50'}`}
+                  className={`border-b border-[var(--color-border)] cursor-pointer hover:bg-[var(--color-accent)]/10 ${i % 2 === 0 ? '' : 'bg-[var(--color-table-alt-row)]'}`}
                 >
                   {row.getVisibleCells().map(cell => (
                     <td key={cell.id} className="px-2 py-1 whitespace-nowrap">

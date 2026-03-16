@@ -12,6 +12,7 @@
   --color-border:           #d0d8ec;
   --color-accent:           #0068c8;
   --color-accent-hover:     #0057a8;
+  --color-accent-subtle:    rgba(0,104,200,0.08);
   --color-text-primary:     #111827;
   --color-text-secondary:   #4a607c;
   --color-text-disabled:    #8fa3bc;
@@ -52,9 +53,10 @@
   --color-border:           #2e3f64;
   --color-accent:           #00c8a8;
   --color-accent-hover:     #00b096;
+  --color-accent-subtle:    rgba(0,200,168,0.09);
   --color-text-primary:     #c4d4ec;
-  --color-text-secondary:   #627eaa;
-  --color-text-disabled:    #3d5070;
+  --color-text-secondary:   #7090bb;  /* was #627eaa — 4.3:1 → 5.3:1 contrast */
+  --color-text-disabled:    #5a7399;  /* was #3d5070 — 2.0:1 → 3.6:1 contrast */
   --color-viewer-bg:        #0c1120;
   --color-table-alt-row:    #1c2340;
   --color-table-header:     #222e4a;

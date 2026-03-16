@@ -3,6 +3,7 @@ import { useFileStore } from '@/stores/file-store'
 import { useProteinStore } from '@/stores/protein-store'
 import { useGroupStore } from '@/stores/group-store'
 import { useMetricsStore } from '@/stores/metrics-store'
+import { useFilterStore } from '@/stores/filter-store'
 import { formatFileSize } from '@/lib/utils'
 import type { MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
 import type { FileInfo } from '@/types/electron'
@@ -317,14 +318,23 @@ function FileRow({
   onClick: (e: React.MouseEvent) => void
 }) {
   const isLarge = file.size > APP_DEFAULTS.MAX_FILE_SIZE_WARNING
+
+  // Optional filter dimming — only when the toggle is on and rules are set
+  const { showFilteredInBrowser, rules, passesFilters } = useFilterStore()
+  const metrics = useMetricsStore(s => s.rows.find(r => r.filePath === file.path)?.metrics)
+  const isFilteredOut = showFilteredInBrowser
+    && rules.some(r => r.metric)
+    && metrics !== undefined
+    && !passesFilters(metrics)
+
   return (
     <button
       onClick={onClick}
       title="Click to load · Ctrl+click to overlay as comparison"
       className={`w-full text-left flex items-center justify-between gap-2 py-1 pr-2 hover:bg-[var(--color-secondary-bg)] transition-colors ${isActive ? 'bg-[var(--color-accent)]/15 font-medium' : ''}`}
-      style={{ paddingLeft: `${8 + indent * 12}px` }}
+      style={{ paddingLeft: `${8 + indent * 12}px`, opacity: isFilteredOut ? 0.35 : 1 }}
     >
-      <span className="text-xs text-[var(--color-text-primary)] truncate flex-1 min-w-0 flex items-center gap-1">
+      <span className={`text-xs truncate flex-1 min-w-0 flex items-center gap-1 ${isFilteredOut ? 'text-[var(--color-text-disabled)]' : 'text-[var(--color-text-primary)]'}`}>
         <FileIcon />
         {file.name}
       </span>

@@ -6,6 +6,7 @@ import { MolstarViewer, type MolstarViewerHandle } from '@/components/viewer/Mol
 import { MetricsTable } from '@/components/metrics/MetricsTable'
 import { ScatterPlot } from '@/components/metrics/ScatterPlot'
 import { SelectionPanel } from '@/components/selection/SelectionPanel'
+import { FilterPanel } from '@/components/filter/FilterPanel'
 import { useFileStore } from '@/stores/file-store'
 
 // Shared card style — applied to each panel's inner wrapper
@@ -128,6 +129,7 @@ export function AppShell() {
                 <TabsTrigger value="files">Files</TabsTrigger>
                 <TabsTrigger value="metrics">Metrics</TabsTrigger>
                 <TabsTrigger value="plot">Plot</TabsTrigger>
+                <TabsTrigger value="filter">Filter</TabsTrigger>
                 <TabsTrigger value="selection">Selection</TabsTrigger>
               </TabsList>
 
@@ -141,6 +143,10 @@ export function AppShell() {
 
               <TabsContent value="plot">
                 <ScatterPlot viewerRef={viewerRef} />
+              </TabsContent>
+
+              <TabsContent value="filter">
+                <FilterPanel />
               </TabsContent>
 
               <TabsContent value="selection">
