@@ -50,7 +50,9 @@
   },
 
   "mac": {
-    "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+    // "universal" merges x64 + arm64 into one fat binary — avoids hdiutil collision
+    // when both arches share the same artifactName, and ships a single DMG for all Macs
+    "target": [{ "target": "dmg", "arch": ["universal"] }],
     "artifactName": "${productName}-macOS-${version}.${ext}",
     "category": "public.app-category.developer-tools",
     "hardenedRuntime": true,
