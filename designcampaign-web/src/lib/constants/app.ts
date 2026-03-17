@@ -7,7 +7,7 @@ export const APP_DEFAULTS = {
   DEFAULT_COLOR_SCHEME: 'spectrum',
   DEFAULT_BACKGROUND_COLOR: '#ffffff',
   MAX_FILE_SIZE_WARNING: 100 * 1024 * 1024,  // 100 MB
-  DEFAULT_INTERFACE_CUTOFF: 4.0,              // Angstroms
+  DEFAULT_INTERFACE_CUTOFF: 6.0,              // Angstroms
   MAX_COMPARISON_STRUCTURES: 4,               // Primary + 3 comparison
   SEQUENCE_HASH_LENGTH: 12,                   // First 12 hex chars of MD5
   CACHE_VERSION: 1,
@@ -41,7 +41,7 @@ export const DEFAULT_CONFIG: UserConfig = {
     cell_size: 'large',
     color_scheme: 'spectrum',
     representation: 'cartoon',
-    interface_cutoff: 4.0,
+    interface_cutoff: 6.0,
     dark_mode: false,
     collapsed_sections: {},
     hidden_columns: [],

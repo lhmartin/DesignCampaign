@@ -2,10 +2,13 @@ import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 're
 import { useMolstar } from './hooks/useMolstar'
 import { ViewerControls, type RepresentationStyle, type ColorScheme } from './ViewerControls'
 import { SequenceViewer } from './SequenceViewer'
+import { InterfaceMenu } from './InterfaceMenu'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useComparisonStore } from '@/stores/comparison-store'
+import { useInterfaceStore } from '@/stores/interface-store'
 import { readFileContent } from '@/lib/fsa'
 import { type ChainSequence, THREE_TO_ONE } from '@/lib/sequence'
+import { getFileFormat } from '@/lib/utils'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -329,8 +332,9 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
     const [spinning, setSpinning] = useState(false)
     const [spinSpeed, setSpinSpeed] = useState(0.2) // 1 rotation every 5s
     const [showAO, setShowAO] = useState(false)
-    const [sequence, setSequence] = useState<ChainSequence[]>([])
-    const [residueValues, setResidueValues] = useState<Map<string, number>>(new Map())
+    const [seqData, setSeqData] = useState<{ seq: ChainSequence[]; values: Map<string, number> }>(
+      { seq: [], values: new Map() }
+    )
     const { toggleResidue, addResidue, clearSelection } = useSelectionStore()
 
     // Subscribe to Mol* state changes to extract sequence automatically.
@@ -342,8 +346,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
         clearTimeout(timer)
         timer = setTimeout(() => {
           const { seq, values } = extractSequenceFromPlugin(plugin)
-          setSequence(seq)
-          setResidueValues(values)
+          setSeqData(prev => seq.length === 0 && prev.seq.length === 0 ? prev : { seq, values })
         }, 250)
       })
       return () => { sub.unsubscribe(); clearTimeout(timer) }
@@ -353,6 +356,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
       loadFromFile: async (filePath: string) => {
         if (!plugin) { onError?.('Mol* viewer not initialized'); return }
         useComparisonStore.getState().clearAll()
+        useInterfaceStore.getState().clear()
         await loadStructureFromFile(plugin, filePath, setIsLoading, onStructureLoaded, onError)
         setStyle('cartoon')
         setColorScheme('sequence-id')
@@ -468,13 +472,14 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
                 onResetView={() => { try { (plugin as any).managers.camera.reset() } catch { /* best effort */ } }}
               />
             </div>
+            <InterfaceMenu plugin={plugin} />
             <CompareMenu plugin={plugin} />
           </div>
         )}
 
         {/* ── Sequence strip ── */}
-        {sequence.length > 0 && (
-          <SequenceViewer chains={sequence} plugin={plugin} residueValues={residueValues} />
+        {seqData.seq.length > 0 && (
+          <SequenceViewer chains={seqData.seq} plugin={plugin} residueValues={seqData.values} />
         )}
 
         {/* ── 3D canvas ── */}
@@ -582,9 +587,10 @@ function extractSequenceFromPlugin(plugin: PluginUIContext): { seq: ChainSequenc
           const chainIdx: number = chainAtomSeg.index[atomIdx]
           const chainId:  string = chainAsymCol.value(chainIdx)
           if (!chainId) continue
-          if (!chainMap.has(chainId)) chainMap.set(chainId, new Map())
-          if (!chainMap.get(chainId)!.has(resNum)) {
-            chainMap.get(chainId)!.set(resNum, THREE_TO_ONE[resName?.toUpperCase() ?? ''] ?? 'X')
+          let chainResidues = chainMap.get(chainId)
+          if (!chainResidues) { chainResidues = new Map(); chainMap.set(chainId, chainResidues) }
+          if (!chainResidues.has(resNum)) {
+            chainResidues.set(resNum, THREE_TO_ONE[resName.toUpperCase()] ?? 'X')
             try {
               const bfCol = conf?.B_iso_or_equiv
               const bFactor = typeof bfCol?.value === 'function'
@@ -614,6 +620,41 @@ function extractSequenceFromPlugin(plugin: PluginUIContext): { seq: ChainSequenc
 
 // ─── Load helpers ─────────────────────────────────────────────────────────────
 
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+/** Batch-update all representations in the given structures (or all loaded ones) in a single task. */
+async function applyToAllRepresentations(
+  plugin: PluginUIContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  updateFn: (old: any) => any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  structureRefs?: any[],
+): Promise<void> {
+  const structures = structureRefs ?? plugin.managers.structure.hierarchy.current.structures
+  if (structures.length === 0) return
+  const update = plugin.state.data.build()
+  for (const structureRef of structures) {
+    for (const component of structureRef.components) {
+      for (const repr of component.representations ?? []) {
+        update.to(repr.cell).update(updateFn)
+      }
+    }
+  }
+  try { await plugin.runTask(plugin.state.data.updateTree(update)) } catch { /* best effort */ }
+}
+
+/** Load raw PDB/mmCIF content into the plugin, parse, and apply the default preset. */
+async function loadStructureData(
+  plugin: PluginUIContext,
+  filePath: string,
+): Promise<void> {
+  const contents = await readFileContent(filePath)
+  const fileName = filePath.split('/').pop() ?? filePath
+  const data = await plugin.builders.data.rawData({ data: contents, label: fileName })
+  const trajectory = await plugin.builders.structure.parseTrajectory(data, getFileFormat(filePath))
+  await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default')
+}
+
 async function loadStructureFromFile(
   plugin: PluginUIContext,
   filePath: string,
@@ -624,19 +665,10 @@ async function loadStructureFromFile(
   setIsLoading(true)
   try {
     await plugin.clear()
-    const contents = await readFileContent(filePath)
-    const fileName = filePath.split('/').pop() ?? filePath
-    const ext = fileName.slice(fileName.lastIndexOf('.') + 1).toLowerCase()
-    const format = ext === 'cif' || ext === 'mmcif' ? 'mmcif' : 'pdb'
-
-    const data = await plugin.builders.data.rawData({ data: contents, label: fileName })
-    const trajectory = await plugin.builders.structure.parseTrajectory(data, format)
-    await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default')
-
+    await loadStructureData(plugin, filePath)
     onStructureLoaded?.(filePath)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Failed to load structure'
-    onError?.(msg)
+    onError?.(err instanceof Error ? err.message : 'Failed to load structure')
   } finally {
     setIsLoading(false)
   }
@@ -648,86 +680,37 @@ async function loadComparisonFromFile(
   onError?: (err: string) => void,
 ): Promise<void> {
   try {
-    const contents = await readFileContent(filePath)
-    const fileName = filePath.split('/').pop() ?? filePath
-    const ext = fileName.slice(fileName.lastIndexOf('.') + 1).toLowerCase()
-    const format = ext === 'cif' || ext === 'mmcif' ? 'mmcif' : 'pdb'
-
     const { nextColor, addEntry } = useComparisonStore.getState()
     const color = nextColor()
 
-    const data = await plugin.builders.data.rawData({ data: contents, label: fileName })
-    const trajectory = await plugin.builders.structure.parseTrajectory(data, format)
-    await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default')
+    await loadStructureData(plugin, filePath)
 
     const structures = plugin.managers.structure.hierarchy.current.structures
     const lastStructure = structures[structures.length - 1]
     if (lastStructure) {
-      for (const component of lastStructure.components) {
-        for (const repr of component.representations ?? []) {
-          try {
-            const update = plugin.state.data.build()
-              .to(repr.cell)
-              .update((old: Record<string, unknown>) => ({
-                ...old,
-                colorTheme: { name: 'uniform', params: { value: color } },
-                alpha: 0.6,
-              }))
-            await plugin.runTask(plugin.state.data.updateTree(update))
-          } catch { /* skip */ }
-        }
-      }
+      await applyToAllRepresentations(
+        plugin,
+        (old: Record<string, unknown>) => ({
+          ...old,
+          colorTheme: { name: 'uniform', params: { value: color } },
+          alpha: 0.6,
+        }),
+        [lastStructure],
+      )
     }
 
-    addEntry({
-      id: crypto.randomUUID(),
-      name: fileName,
-      filePath,
-      color,
-      visible: true,
-      rmsd: null,
-      dataRef: null,
-    })
+    const fileName = filePath.split('/').pop() ?? filePath
+    addEntry({ id: crypto.randomUUID(), name: fileName, filePath, color, visible: true, rmsd: null, dataRef: null })
   } catch (err) {
     onError?.(err instanceof Error ? err.message : 'Failed to load comparison')
   }
 }
 
 async function applyStyle(plugin: PluginUIContext, style: RepresentationStyle): Promise<void> {
-  const structures = plugin.managers.structure.hierarchy.current.structures
-  if (structures.length === 0) return
   const reprType = STYLE_MAP[style]
-  for (const structureRef of structures) {
-    for (const component of structureRef.components) {
-      for (const repr of component.representations ?? []) {
-        try {
-          const update = plugin.state.data.build()
-            .to(repr.cell)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .update((old: any) => ({ ...old, type: { name: reprType, params: {} } }))
-          await plugin.runTask(plugin.state.data.updateTree(update))
-        } catch { /* skip */ }
-      }
-    }
-  }
+  await applyToAllRepresentations(plugin, (old: any) => ({ ...old, type: { name: reprType, params: {} } })) // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 async function applyColorScheme(plugin: PluginUIContext, scheme: ColorScheme): Promise<void> {
-  const structures = plugin.managers.structure.hierarchy.current.structures
-  if (structures.length === 0) return
-  for (const structureRef of structures) {
-    for (const component of structureRef.components) {
-      for (const repr of component.representations ?? []) {
-        try {
-          const update = plugin.state.data.build()
-            .to(repr.cell)
-            .update((old: Record<string, unknown>) => ({
-              ...old,
-              colorTheme: { name: scheme, params: {} },
-            }))
-          await plugin.runTask(plugin.state.data.updateTree(update))
-        } catch { /* skip */ }
-      }
-    }
-  }
+  await applyToAllRepresentations(plugin, (old: Record<string, unknown>) => ({ ...old, colorTheme: { name: scheme, params: {} } }))
 }

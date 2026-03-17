@@ -52,6 +52,12 @@ export function useMolstar(containerRef: RefObject<HTMLDivElement | null>) {
           import('../themes/hydrophobicity-theme')
             .then(m => m.registerHydrophobicityTheme(p))
             .catch(console.warn)
+          import('../themes/plddt-theme')
+            .then(m => m.registerPlddtTheme(p))
+            .catch(console.warn)
+          import('../themes/interface-theme')
+            .then(m => m.registerInterfaceTheme(p))
+            .catch(console.warn)
         } else {
           p.dispose()
         }
