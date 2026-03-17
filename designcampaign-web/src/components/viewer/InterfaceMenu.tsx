@@ -6,6 +6,7 @@ import { useMetricsStore } from '@/stores/metrics-store'
 import { extractAtomsFromPlugin, computeContacts } from '@/lib/interface-calc'
 import { parseAtoms } from '@/lib/parsers/parse-atoms'
 import { readFileContent } from '@/lib/fsa'
+import { getFileStem } from '@/lib/utils'
 import { INTERFACE_THEME_ID, PARATOPE_COLOR, EPITOPE_COLOR } from './themes/interface-theme'
 import { applyToAllRepresentations } from './MolstarViewer'
 
@@ -246,9 +247,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
     setBatchProgress({ done: 0, total: files.length })
     store.setCalculating(true)
 
-    const nParatopeMap = new Map<string, number>()
-    const nEpitopeMap  = new Map<string, number>()
-    const nContactsMap = new Map<string, number>()
+    const batchResults: Array<{ filePath: string; name: string; metrics: Record<string, number> }> = []
 
     try {
       for (let i = 0; i < files.length; i += BATCH_SIZE) {
@@ -264,20 +263,24 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
           const binderAtoms = parseAtoms(text, binderChains, atomScope)
           const targetAtoms = parseAtoms(text, targetChains, atomScope)
           const result      = computeContacts(binderAtoms, targetAtoms, cutoff)
-          const name        = batch[j].path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? batch[j].path
-          nParatopeMap.set(name, result.paratope.size)
-          nEpitopeMap.set(name, result.epitope.size)
-          nContactsMap.set(name, result.nContacts)
+          batchResults.push({
+            filePath: batch[j].path,
+            name:     getFileStem(batch[j].name),   // matches the name used by calculateAll
+            metrics: {
+              n_paratope: result.paratope.size,
+              n_epitope:  result.epitope.size,
+              n_contacts: result.nContacts,
+            },
+          })
         }
         // Throttle progress updates and yield to UI thread each batch
         setBatchProgress({ done: Math.min(i + BATCH_SIZE, files.length), total: files.length })
         await new Promise(r => setTimeout(r, 0))
       }
 
-      const { injectColumn } = useMetricsStore.getState()
-      injectColumn('n_paratope', nParatopeMap)
-      injectColumn('n_epitope',  nEpitopeMap)
-      injectColumn('n_contacts', nContactsMap)
+      // Single upsert — creates rows for files not yet in the metrics table,
+      // or merges columns into existing rows matched by filePath then name.
+      useMetricsStore.getState().batchInjectResults(batchResults)
     } catch (err) {
       store.setError(err instanceof Error ? err.message : 'Batch failed')
     } finally {

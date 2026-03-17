@@ -40,6 +40,12 @@ interface MetricsStore {
   renameRow: (oldName: string, newName: string) => void
   /** Inject a computed column (e.g. rank_score) across all rows, keyed by row name. */
   injectColumn: (colName: string, values: Map<string, number>) => void
+  /**
+   * Upsert multiple rows that each carry one or more new columns (e.g. from batch
+   * interface detection).  Matches existing rows by filePath first, then name.
+   * Creates new rows for any file not yet in the metrics table.
+   */
+  batchInjectResults: (data: Array<{ filePath: string; name: string; metrics: Record<string, number> }>) => void
   clearAll: () => void
 }
 
@@ -179,6 +185,18 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
     ),
     allColumns: mergeColumns(s.allColumns, [colName]),
   })),
+
+  batchInjectResults: (data) => set(s => {
+    const newCols: string[] = []
+    const incoming: ProteinMetrics[] = data.map(({ filePath, name, metrics }) => {
+      for (const k of Object.keys(metrics)) if (!newCols.includes(k)) newCols.push(k)
+      return { name, filePath, metrics }
+    })
+    return {
+      rows: upsertRows(s.rows, incoming),
+      allColumns: mergeColumns(s.allColumns, newCols),
+    }
+  }),
 
   clearAll: () => set({ rows: [], allColumns: BUILTIN_COLS, columnRanges: {} }),
 
