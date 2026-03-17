@@ -20,6 +20,7 @@ export function residueNumbersFromKeys(keys: ResidueKey[]): number[] {
   const nums = new Set<number>()
   for (const key of keys) {
     const sep = key.lastIndexOf(':')
+    if (sep < 0) continue                       // skip keys without a chain prefix
     const n = parseInt(key.slice(sep + 1), 10)
     if (!isNaN(n)) nums.add(n)
   }

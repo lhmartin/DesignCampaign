@@ -198,7 +198,7 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
     }
   }),
 
-  clearAll: () => set({ rows: [], allColumns: BUILTIN_COLS, columnRanges: {} }),
+  clearAll: () => set({ rows: [], allColumns: BUILTIN_COLS, columnRanges: {}, filterText: '' }),
 
   addRow: (row) => set(s => ({
     rows: upsertRows(s.rows, [row]),

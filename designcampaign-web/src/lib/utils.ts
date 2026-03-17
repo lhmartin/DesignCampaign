@@ -14,7 +14,8 @@ export function formatFileSize(bytes: number): string {
 
 /** Get file format from extension */
 export function getFileFormat(filePath: string): 'pdb' | 'mmcif' {
-  return filePath.toLowerCase().endsWith('.cif') ? 'mmcif' : 'pdb'
+  const lower = filePath.toLowerCase()
+  return lower.endsWith('.cif') || lower.endsWith('.mmcif') ? 'mmcif' : 'pdb'
 }
 
 /** Extract filename stem (no extension) */
