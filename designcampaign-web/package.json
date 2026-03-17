@@ -25,6 +25,7 @@
     "@tanstack/react-table": "^8.21.3",
     "@types/plotly.js": "^3.0.10",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^0.577.0",
     "molstar": "^5.7.0",
     "plotly.js": "^3.4.0",

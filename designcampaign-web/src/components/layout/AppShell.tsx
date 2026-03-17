@@ -8,6 +8,7 @@ import { ScatterPlot } from '@/components/metrics/ScatterPlot'
 import { SelectionPanel } from '@/components/selection/SelectionPanel'
 import { FilterPanel } from '@/components/filter/FilterPanel'
 import { useFileStore } from '@/stores/file-store'
+import { UpdateBanner } from './UpdateBanner'
 
 // Shared card style — applied to each panel's inner wrapper
 const cardStyle: React.CSSProperties = {
@@ -42,6 +43,9 @@ export function AppShell() {
       overflow: 'hidden',
       background: 'var(--color-background)',
     }}>
+
+      {/* ── Update banner (visible only when a new version is ready) ──────── */}
+      <UpdateBanner />
 
       {/* ── Title bar ─────────────────────────────────────────────────────── */}
       <div style={{

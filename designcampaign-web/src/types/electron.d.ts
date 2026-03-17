@@ -28,6 +28,11 @@ export interface ElectronAPI {
   // Menu events — return cleanup functions
   onMenuOpenFolder(callback: () => void): () => void
   onMenuRefresh(callback: () => void): () => void
+
+  // Auto-update — return cleanup functions
+  onUpdateAvailable(callback: () => void): () => void
+  onUpdateDownloaded(callback: () => void): () => void
+  installUpdate(): void
 }
 
 declare global {

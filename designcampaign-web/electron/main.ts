@@ -1,6 +1,7 @@
-import { app, BrowserWindow, Menu } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { autoUpdater } from 'electron-updater'
 import { registerIpcHandlers, cleanupWatchers } from './ipc-handlers'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -97,3 +98,22 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(createWindow)
+
+// ── Auto-update ───────────────────────────────────────────────────────────────
+// Only runs in production (VITE_DEV_SERVER_URL is set during `npm run dev`).
+if (!VITE_DEV_SERVER_URL) {
+  autoUpdater.checkForUpdates()
+
+  autoUpdater.on('update-available', () => {
+    win?.webContents.send('update:available')
+  })
+
+  autoUpdater.on('update-downloaded', () => {
+    win?.webContents.send('update:downloaded')
+  })
+}
+
+// Renderer requests quit-and-install after update-downloaded
+ipcMain.on('update:install', () => {
+  autoUpdater.quitAndInstall()
+})

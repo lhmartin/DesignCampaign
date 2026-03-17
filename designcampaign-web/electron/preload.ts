@@ -49,4 +49,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('menu:refresh', callback)
     return () => ipcRenderer.off('menu:refresh', callback)
   },
+
+  // Auto-update events — return cleanup functions
+  onUpdateAvailable: (cb: () => void): (() => void) => {
+    ipcRenderer.on('update:available', cb)
+    return () => ipcRenderer.off('update:available', cb)
+  },
+
+  onUpdateDownloaded: (cb: () => void): (() => void) => {
+    ipcRenderer.on('update:downloaded', cb)
+    return () => ipcRenderer.off('update:downloaded', cb)
+  },
+
+  installUpdate: (): void => {
+    ipcRenderer.send('update:install')
+  },
 })

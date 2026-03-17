@@ -6,6 +6,12 @@
   "copyright": "Copyright © 2024",
   "asar": true,
 
+  "publish": [{
+    "provider": "github",
+    "owner": "lhmartin",
+    "repo": "DesignCampaign"
+  }],
+
   "directories": {
     "output": "release/${version}",
     "buildResources": "resources"
