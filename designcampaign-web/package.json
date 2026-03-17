@@ -1,7 +1,13 @@
 {
   "name": "designcampaign-web",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
+  "description": "Protein structure analysis and design campaign tool",
+  "homepage": "https://github.com/lhmartin/DesignCampaign",
+  "author": {
+    "name": "Luke Martin",
+    "email": "lhmartin@users.noreply.github.com"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
