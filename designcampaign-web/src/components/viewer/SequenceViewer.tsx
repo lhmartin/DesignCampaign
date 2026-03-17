@@ -1,7 +1,9 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react'
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react'
 import type { ChainSequence } from '@/lib/sequence'
 import { residueColor, HYDROPHOBICITY_SCALE } from '@/lib/sequence'
+import { lerpColor } from '@/lib/constants/colors'
 import { useSelectionStore } from '@/stores/selection-store'
+import { syncToMolstar } from '@/lib/mol-selection-sync'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -12,38 +14,72 @@ const AA_H         = 17   // px for amino-acid cell row
 const ROW_H        = NUM_H + AA_H   // 28 px per wrapped row
 const CHUNK        = 8    // residues per chunk
 const CHUNK_GAP    = 4    // px gap between chunks
-const ROW_GAP      = 3    // px gap between wrapped rows
+const ROW_GAP      = 1    // px gap between wrapped rows
 const MAX_ROWS     = 6    // max visible rows before vertical scroll
-const CONTROLS_W   = 50   // px width of left colour-mode controls
-const CHAIN_PILL_W = 28   // px width reserved for chain label
-const MAX_STRIP_H  = MAX_ROWS * ROW_H + (MAX_ROWS - 1) * ROW_GAP + 12  // ≈ 185 px
+const CONTROLS_W   = 90   // px width of left colour-mode controls
+const CHAIN_PILL_W = 36   // px width reserved for chain label
+const MAX_STRIP_H  = MAX_ROWS * ROW_H + (MAX_ROWS - 1) * ROW_GAP + 12  // ≈ 185 px (recomputes with ROW_GAP)
 
 // ─── Color mode ───────────────────────────────────────────────────────────────
-type ColorMode = 'chemical' | 'hydrophobicity' | 'plddt'
+type ColorMode = 'none' | 'chemical' | 'hydrophobicity' | 'plddt'
 
-// ─── Color helpers ────────────────────────────────────────────────────────────
-function lerpHex(a: string, b: string, t: number): string {
-  const ah = parseInt(a.slice(1), 16)
-  const bh = parseInt(b.slice(1), 16)
-  const ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff
-  const br = (bh >> 16) & 0xff, bg2 = (bh >> 8) & 0xff, bb = bh & 0xff
-  const r  = Math.round(ar + (br - ar) * t)
-  const g  = Math.round(ag + (bg2 - ag) * t)
-  const b2 = Math.round(ab + (bb - ab) * t)
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b2.toString(16).padStart(2, '0')}`
+// ─── Color legend ─────────────────────────────────────────────────────────────
+function Swatch({ bg, label }: { bg: string; label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div style={{ width: 9, height: 9, borderRadius: 2, background: bg, flexShrink: 0, border: '1px solid rgba(128,128,128,0.15)' }} />
+      <span style={{ fontSize: 9.5, color: 'var(--color-text-secondary)', lineHeight: 1, whiteSpace: 'nowrap' }}>{label}</span>
+    </div>
+  )
 }
 
+function ColorLegend({ mode }: { mode: ColorMode }) {
+  if (mode === 'none') return null
+
+  if (mode === 'chemical') return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
+      <Swatch bg="rgba(255,155,60,0.85)"  label="Nonpolar" />
+      <Swatch bg="rgba(72,200,110,0.85)"  label="Polar" />
+      <Swatch bg="rgba(80,140,255,0.85)"  label="+Charged" />
+      <Swatch bg="rgba(255,80,80,0.85)"   label="−Charged" />
+      <Swatch bg="rgba(160,160,180,0.85)" label="Gly" />
+    </div>
+  )
+
+  if (mode === 'hydrophobicity') return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
+      <div style={{ height: 9, borderRadius: 2, background: 'linear-gradient(to right, #3b82f6, #f97316)' }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Philic</span>
+        <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Phobic</span>
+      </div>
+    </div>
+  )
+
+  // plddt
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
+      <Swatch bg="#0053d6" label=">90 V.High" />
+      <Swatch bg="#65cbf3" label=">70 Confid" />
+      <Swatch bg="#ffdb13" label=">50 Low" />
+      <Swatch bg="#ff7d45" label="≤50 V.Low" />
+    </div>
+  )
+}
+
+// ─── Color helpers ────────────────────────────────────────────────────────────
 function hydroColor(code: string): { bg: string; fg: string } {
   const h = HYDROPHOBICITY_SCALE[code] ?? 0
   const t = Math.max(0, Math.min(1, (h + 4.5) / 9))
-  return { bg: lerpHex('#3b82f6', '#f97316', t), fg: '#ffffff' }
+  // #3b82f6 (blue) → #f97316 (orange)
+  return { bg: lerpColor(t, [59, 130, 246], [249, 115, 22]), fg: '#ffffff' }
 }
 
 function plddtColor(value: number | undefined): { bg: string; fg: string } {
   if (value === undefined) return { bg: 'rgba(120,120,140,0.25)', fg: '#888898' }
-  if (value >= 90) return { bg: '#0053d6', fg: '#ffffff' }
-  if (value >= 70) return { bg: '#65cbf3', fg: '#0a0e1a' }
-  if (value >= 50) return { bg: '#ffdb13', fg: '#0a0e1a' }
+  if (value > 90) return { bg: '#0053d6', fg: '#ffffff' }
+  if (value > 70) return { bg: '#65cbf3', fg: '#0a0e1a' }
+  if (value > 50) return { bg: '#ffdb13', fg: '#0a0e1a' }
   return { bg: '#ff7d45', fg: '#ffffff' }
 }
 
@@ -67,45 +103,6 @@ function keysInRange(chains: ChainSequence[], a: Pos, b: Pos): string[] {
     }
   }
   return keys
-}
-
-// ─── Mol* 3D sync ─────────────────────────────────────────────────────────────
-async function syncToMolstar(plugin: PluginUIContext | null, keys: string[]): Promise<void> {
-  if (!plugin) return
-  if (keys.length === 0) {
-    try { plugin.managers.interactivity.lociSelects.deselectAll() } catch { /* best effort */ }
-    return
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { Script } = await import('molstar/lib/mol-script/script') as any
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { StructureSelection } = await import('molstar/lib/mol-model/structure') as any
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { MolScriptBuilder: B } = await import('molstar/lib/mol-script/language/builder') as any
-    const struct = plugin.managers.structure.hierarchy.current.structures[0]?.cell.obj?.data
-    if (!struct) return
-
-    const byChain: Record<string, number[]> = {}
-    for (const key of keys) {
-      const [chainId, resIdStr] = key.split(':')
-      ;(byChain[chainId] ??= []).push(Number(resIdStr))
-    }
-
-    const exprs = Object.entries(byChain).map(([chainId, resIds]) =>
-      B.struct.generator.atomGroups({
-        'chain-test': B.core.rel.eq([B.struct.atomProperty.macromolecular.auth_asym_id(), chainId]),
-        'residue-test': B.core.set.has([
-          B.set(...resIds),
-          B.struct.atomProperty.macromolecular.auth_seq_id(),
-        ]),
-      })
-    )
-    const query = exprs.length === 1 ? exprs[0] : B.struct.combinator.merge(exprs)
-    const sel = Script.getStructureSelection((_: unknown) => query, struct)
-    const loci = StructureSelection.toLociWithSourceUnits(sel)
-    plugin.managers.interactivity.lociSelects.selectOnly({ loci })
-  } catch { /* best effort — 3D sync is non-critical */ }
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -132,7 +129,8 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
     const el = containerRef.current
     if (!el) return
     const ro = new ResizeObserver(entries => {
-      setContainerWidth(entries[0].contentRect.width)
+      const w = Math.round(entries[0].contentRect.width)
+      setContainerWidth(prev => prev === w ? prev : w)
     })
     ro.observe(el)
     return () => ro.disconnect()
@@ -150,14 +148,32 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
     return new Set(keysInRange(chains, anchor, dragEnd))
   }, [chains, anchor, dragEnd])
 
+  // Pre-build wrapped display rows — only recomputes when chains or layout changes, not on hover
+  const displayRows = useMemo(() =>
+    chains.flatMap((chain, ci) => {
+      const totalRows = Math.ceil(chain.residues.length / residuesPerRow)
+      return Array.from({ length: totalRows }, (_, rowIdx) => ({
+        chain,
+        chainIdx:    ci,
+        rowIdx,
+        isFirstRow:  rowIdx === 0,
+        isLastChain: ci === chains.length - 1,
+        rowStartIdx: rowIdx * residuesPerRow,
+        residues:    chain.residues.slice(rowIdx * residuesPerRow, (rowIdx + 1) * residuesPerRow),
+      }))
+    })
+  , [chains, residuesPerRow])
+
   if (chains.length === 0) return null
 
   // ── Cell color by mode ──────────────────────────────────────────────────────
-  function cellColors(code: string, key: string): { bg: string; fg: string } {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cellColors = useCallback((code: string, key: string): { bg: string; fg: string } => {
+    if (colorMode === 'none')          return { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' }
     if (colorMode === 'hydrophobicity') return hydroColor(code)
-    if (colorMode === 'plddt') return plddtColor(residueValues?.get(key))
+    if (colorMode === 'plddt')          return plddtColor(residueValues?.get(key))
     return residueColor(code)
-  }
+  }, [colorMode, residueValues])
 
   // ── Event handlers ──────────────────────────────────────────────────────────
   function handleCellMouseDown(
@@ -208,27 +224,6 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
     setDragEnd(null)
   }
 
-  // ── Color mode labels ───────────────────────────────────────────────────────
-  const MODES: { mode: ColorMode; label: string }[] = [
-    { mode: 'chemical',       label: 'Chem'  },
-    { mode: 'hydrophobicity', label: 'Hydro' },
-    { mode: 'plddt',          label: 'pLDDT' },
-  ]
-
-  // ── Build wrapped display rows across all chains ─────────────────────────────
-  const displayRows = chains.flatMap((chain, ci) => {
-    const totalRows = Math.ceil(chain.residues.length / residuesPerRow)
-    return Array.from({ length: totalRows }, (_, rowIdx) => ({
-      chain,
-      chainIdx:    ci,
-      rowIdx,
-      isFirstRow:  rowIdx === 0,
-      isLastChain: ci === chains.length - 1,
-      rowStartIdx: rowIdx * residuesPerRow,
-      residues:    chain.residues.slice(rowIdx * residuesPerRow, (rowIdx + 1) * residuesPerRow),
-    }))
-  })
-
   return (
     <div
       ref={containerRef}
@@ -253,39 +248,36 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
         borderRight: '1px solid var(--color-border)',
         display: 'flex',
         flexDirection: 'column',
-        gap: 3,
-        padding: '7px 6px 7px 8px',
-        alignItems: 'flex-start',
+        padding: '7px 6px',
+        alignItems: 'stretch',
+        overflowY: 'auto',
       }}>
-        {MODES.map(({ mode, label }) => (
-          <button
-            key={mode}
-            onClick={() => setColorMode(mode)}
-            style={{
-              padding: '1px 5px',
-              borderRadius: 99,
-              fontSize: 8,
-              fontFamily: 'Outfit, sans-serif',
-              fontWeight: 600,
-              letterSpacing: '0.03em',
-              border: colorMode === mode
-                ? '1px solid color-mix(in srgb, var(--color-accent) 50%, transparent)'
-                : '1px solid var(--color-border)',
-              background: colorMode === mode
-                ? 'color-mix(in srgb, var(--color-accent) 14%, transparent)'
-                : 'transparent',
-              color: colorMode === mode
-                ? 'var(--color-accent)'
-                : 'var(--color-text-disabled)',
-              cursor: 'pointer',
-              transition: 'all 0.1s',
-              flexShrink: 0,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {label}
-          </button>
-        ))}
+        {/* Dropdown */}
+        <select
+          value={colorMode}
+          onChange={e => setColorMode(e.target.value as ColorMode)}
+          style={{
+            fontSize: 9,
+            fontFamily: 'Outfit, sans-serif',
+            fontWeight: 600,
+            padding: '2px 3px',
+            borderRadius: 4,
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-background)',
+            color: 'var(--color-text-primary)',
+            cursor: 'pointer',
+            width: '100%',
+            flexShrink: 0,
+          }}
+        >
+          <option value="none">None</option>
+          <option value="chemical">Chem</option>
+          <option value="hydrophobicity">Hydro</option>
+          <option value="plddt">pLDDT</option>
+        </select>
+
+        {/* Legend */}
+        <ColorLegend mode={colorMode} />
       </div>
 
       {/* ── Wrapped sequence rows (scrolls vertically) ── */}
@@ -293,7 +285,7 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
         flex: 1,
         overflowY: 'auto',
         overflowX: 'hidden',
-        padding: '4px 8px 4px 4px',
+        padding: '4px 20px 4px 4px',
         display: 'flex',
         flexDirection: 'column',
         gap: ROW_GAP,
@@ -326,12 +318,12 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
                   <span style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    padding: '1px 4px',
+                    padding: '2px 7px',
                     borderRadius: 99,
-                    fontSize: 7.5,
+                    fontSize: 10,
                     fontWeight: 700,
                     fontFamily: 'Outfit, sans-serif',
-                    letterSpacing: '0.05em',
+                    letterSpacing: '0.06em',
                     textTransform: 'uppercase',
                     color: 'var(--color-accent)',
                     background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
@@ -413,11 +405,12 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
                     const isChunkEnd  = (globalIdx + 1) % CHUNK === 0 && i < row.residues.length - 1
 
                     const { bg: modeBg, fg: modeFg } = cellColors(res.code, key)
+                    const dimBg  = `color-mix(in srgb, ${modeBg} 65%, transparent)`
                     const cellBg = isActive
                       ? 'var(--color-accent)'
                       : isHovered
                         ? `color-mix(in srgb, var(--color-accent) 28%, ${modeBg})`
-                        : modeBg
+                        : dimBg
                     const cellFg = isActive ? '#0a0e1a' : modeFg
 
                     return (
@@ -436,14 +429,14 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
                             justifyContent: 'center',
                             background: cellBg,
                             color: cellFg,
-                            fontSize: 8.5,
+                            fontSize: 11,
                             fontFamily: 'JetBrains Mono, monospace',
                             fontWeight: 700,
                             cursor: 'pointer',
                             transition: isActive ? 'none' : 'background 60ms ease',
                             boxSizing: 'border-box',
                             borderRight: !isChunkEnd && i < row.residues.length - 1
-                              ? '1px solid rgba(0,0,0,0.07)'
+                              ? '1px solid rgba(128,128,128,0.14)'
                               : 'none',
                             borderBottom: isSelected
                               ? '2px solid color-mix(in srgb, var(--color-accent) 80%, #fff)'

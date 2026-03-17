@@ -1,10 +1,8 @@
-import type { AtomRecord } from './parsers/parse-atoms'
 import type { AtomScope } from '@/stores/interface-store'
 import type { SelectionKey } from '@/types/selection'
+import { type AtomRecord, BACKBONE_ATOMS } from './parsers/parse-atoms'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
-
-const BACKBONE_ATOMS = new Set(['N', 'CA', 'C', 'O'])
 
 // ─── Atom extraction from live Mol* plugin ───────────────────────────────────
 

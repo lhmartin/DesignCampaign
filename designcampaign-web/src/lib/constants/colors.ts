@@ -67,7 +67,7 @@ export const DARK_THEME = {
 
 // Color gradient functions for B-factor, hydrophobicity, metric coloring
 
-function lerpColor(
+export function lerpColor(
   t: number,
   c1: [number, number, number],
   c2: [number, number, number]

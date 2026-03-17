@@ -11,6 +11,10 @@ import { useInterfaceStore } from '@/stores/interface-store'
 
 export const INTERFACE_THEME_ID = 'interface-contacts'
 
+// Shared color constants — also used by InterfaceMenu and SelectionPanel
+export const PARATOPE_COLOR = '#38bdf8'   // sky-400 cyan
+export const EPITOPE_COLOR  = '#f87171'   // red-400 coral
+
 const PARATOPE_HEX = 0x38bdf8
 const EPITOPE_HEX  = 0xf87171
 const OTHER_HEX    = 0x6b7280

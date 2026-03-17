@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { useSelectionStore } from '@/stores/selection-store'
 
 export type RepresentationStyle = 'cartoon' | 'ball-and-stick' | 'spacefill' | 'line' | 'gaussian-surface'
-export type ColorScheme = 'sequence-id' | 'chain-id' | 'secondary-structure' | 'uncertainty' | 'hydrophobicity' | 'element-symbol'
+export type ColorScheme = 'sequence-id' | 'chain-id' | 'secondary-structure' | 'plddt-bands' | 'hydrophobicity' | 'element-symbol'
 
 const STYLE_OPTIONS: { value: RepresentationStyle; label: string }[] = [
   { value: 'cartoon',          label: 'Cartoon' },
@@ -17,7 +17,7 @@ const COLOR_OPTIONS: { value: ColorScheme; label: string }[] = [
   { value: 'sequence-id',         label: 'Spectrum (N→C)' },
   { value: 'chain-id',            label: 'Chain' },
   { value: 'secondary-structure', label: 'Sec. Structure' },
-  { value: 'uncertainty',         label: 'B-factor / pLDDT' },
+  { value: 'plddt-bands',         label: 'pLDDT / B-factor' },
   { value: 'hydrophobicity',      label: 'Hydrophobicity' },
   { value: 'element-symbol',      label: 'Element' },
 ]

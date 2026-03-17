@@ -3,6 +3,7 @@ import { useSelectionStore, type SelectionKey } from '@/stores/selection-store'
 import { useInterfaceStore } from '@/stores/interface-store'
 import { useFileStore } from '@/stores/file-store'
 import { downloadBlob } from '@/lib/utils'
+import { PARATOPE_COLOR, EPITOPE_COLOR } from '@/components/viewer/themes/interface-theme'
 
 /** Parse a "chainId:resId" key into its parts. */
 function parseKey(key: SelectionKey): { chain: string; resId: number } {
@@ -219,7 +220,7 @@ export function SelectionPanel() {
             label="Paratope (binder)"
             filename={filename}
             keys={paratope}
-            accentColor="#38bdf8"
+            accentColor={PARATOPE_COLOR}
           />
         )}
         {epitope.size > 0 && (
@@ -227,7 +228,7 @@ export function SelectionPanel() {
             label="Epitope (target)"
             filename={filename}
             keys={epitope}
-            accentColor="#f87171"
+            accentColor={EPITOPE_COLOR}
           />
         )}
 

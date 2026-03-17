@@ -6,9 +6,25 @@ import { useMetricsStore } from '@/stores/metrics-store'
 import { extractAtomsFromPlugin, computeContacts } from '@/lib/interface-calc'
 import { parseAtoms } from '@/lib/parsers/parse-atoms'
 import { readFileContent } from '@/lib/fsa'
-import { INTERFACE_THEME_ID } from './themes/interface-theme'
+import { INTERFACE_THEME_ID, PARATOPE_COLOR, EPITOPE_COLOR } from './themes/interface-theme'
+import { applyToAllRepresentations } from './MolstarViewer'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
+
+// ── Module-level constants ────────────────────────────────────────────────────
+
+const calcBtn: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  gap: 5, padding: '5px 10px', borderRadius: 5, fontSize: 10,
+  border: '1px solid var(--color-border)',
+  background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
+  color: 'var(--color-accent)', cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
+  fontWeight: 600,
+}
+const disabledBtn: React.CSSProperties = { ...calcBtn, opacity: 0.5, cursor: 'not-allowed' }
+const secondaryBtn: React.CSSProperties = { ...calcBtn, background: 'transparent', color: 'var(--color-text-secondary)' }
+
+const BATCH_SIZE = 10   // files read in parallel per batch
 
 // ── Chain management helpers ──────────────────────────────────────────────────
 
@@ -135,7 +151,6 @@ function ChainSelector({
 function IconInterface({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
-      {/* Two circles (binder / target) connected by dots */}
       <circle cx="3.5" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.2" />
       <circle cx="10.5" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.2" />
       <line x1="6" y1="7" x2="8" y2="7" stroke="currentColor" strokeWidth="1.2" strokeDasharray="1.5 0.8" />
@@ -146,7 +161,7 @@ function IconInterface({ size = 14 }: { size?: number }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
-  const [open, setOpen]       = useState(false)
+  const [open, setOpen]           = useState(false)
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -172,16 +187,15 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  // On open: enumerate chains + auto-detect binder/target from groups
+  // On open: enumerate chains + auto-detect binder/target from groups.
+  // `open` here reads the pre-flip value intentionally: false = currently closed → opening.
   const handleOpen = useCallback(() => {
     setOpen(prev => !prev)
-    if (open) return   // closing
+    if (open) return   // currently open → closing, nothing to do
 
-    const chains = getChainsFromPlugin(plugin)
-    setAllChains(chains)
+    setAllChains(getChainsFromPlugin(plugin))
 
     const { binderChains: curBinder, targetChains: curTarget } = useInterfaceStore.getState()
-    // Only auto-detect if chains are currently empty
     if (curBinder.length === 0 && curTarget.length === 0) {
       const detected = detectChainsFromGroups(useFileStore.getState().activeFile)
       if (detected) {
@@ -189,26 +203,6 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
       }
     }
   }, [open, plugin])
-
-  // ── Apply interface color theme to viewer ──────────────────────────────────
-  const applyInterfaceTheme = useCallback(async () => {
-    try {
-      const structures = (plugin as any).managers.structure.hierarchy.current.structures
-      if (structures.length === 0) return
-      const update = (plugin as any).state.data.build()
-      for (const structureRef of structures) {
-        for (const component of structureRef.components) {
-          for (const repr of component.representations ?? []) {
-            update.to(repr.cell).update((old: any) => ({
-              ...old,
-              colorTheme: { name: INTERFACE_THEME_ID, params: {} },
-            }))
-          }
-        }
-      }
-      await (plugin as any).runTask((plugin as any).state.data.updateTree(update))
-    } catch { /* best effort */ }
-  }, [plugin])
 
   // ── Single-structure calculation ───────────────────────────────────────────
   const handleCalculate = useCallback(async () => {
@@ -227,15 +221,19 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
       }
       const { paratope, epitope } = computeContacts(binderAtoms, targetAtoms, store.cutoff)
       store.setResults(paratope, epitope)
-      await applyInterfaceTheme()
+      // Apply interface colour theme using the shared helper from MolstarViewer
+      await applyToAllRepresentations(plugin, (old: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
+        ...old,
+        colorTheme: { name: INTERFACE_THEME_ID, params: {} },
+      }))
     } catch (err) {
       store.setError(err instanceof Error ? err.message : 'Calculation failed')
     } finally {
       useInterfaceStore.getState().setCalculating(false)
     }
-  }, [plugin, applyInterfaceTheme])
+  }, [plugin])
 
-  // ── Batch calculation ──────────────────────────────────────────────────────
+  // ── Batch calculation — reads files in parallel batches ────────────────────
   const handleBatch = useCallback(async () => {
     const store = useInterfaceStore.getState()
     if (store.binderChains.length === 0 || store.targetChains.length === 0) {
@@ -243,10 +241,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
       return
     }
     const files = useFileStore.getState().files
-    if (files.length === 0) {
-      store.setError('No files loaded.')
-      return
-    }
+    if (files.length === 0) { store.setError('No files loaded.'); return }
 
     setBatchProgress({ done: 0, total: files.length })
     store.setCalculating(true)
@@ -256,21 +251,27 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
     const nContactsMap = new Map<string, number>()
 
     try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i]
-        try {
-          const pdbText     = await readFileContent(file.path)
-          const binderAtoms = parseAtoms(pdbText, store.binderChains, store.atomScope)
-          const targetAtoms = parseAtoms(pdbText, store.targetChains, store.atomScope)
-          const result      = computeContacts(binderAtoms, targetAtoms, store.cutoff)
-          const name        = file.path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? file.path
+      for (let i = 0; i < files.length; i += BATCH_SIZE) {
+        const batch = files.slice(i, i + BATCH_SIZE)
+        // Read all files in the batch concurrently
+        const texts = await Promise.all(
+          batch.map(f => readFileContent(f.path).catch(() => null))
+        )
+        const { binderChains, targetChains, atomScope, cutoff } = useInterfaceStore.getState()
+        for (let j = 0; j < batch.length; j++) {
+          const text = texts[j]
+          if (!text) continue
+          const binderAtoms = parseAtoms(text, binderChains, atomScope)
+          const targetAtoms = parseAtoms(text, targetChains, atomScope)
+          const result      = computeContacts(binderAtoms, targetAtoms, cutoff)
+          const name        = batch[j].path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? batch[j].path
           nParatopeMap.set(name, result.paratope.size)
           nEpitopeMap.set(name, result.epitope.size)
           nContactsMap.set(name, result.nContacts)
-        } catch { /* skip unreadable files */ }
-        setBatchProgress({ done: i + 1, total: files.length })
-        // Yield to UI thread every 10 files
-        if (i % 10 === 9) await new Promise(r => setTimeout(r, 0))
+        }
+        // Throttle progress updates and yield to UI thread each batch
+        setBatchProgress({ done: Math.min(i + BATCH_SIZE, files.length), total: files.length })
+        await new Promise(r => setTimeout(r, 0))
       }
 
       const { injectColumn } = useMetricsStore.getState()
@@ -287,17 +288,6 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
 
   const hasResults = paratope.size > 0 || epitope.size > 0
 
-  // ── Button styles ──────────────────────────────────────────────────────────
-  const calcBtn: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    gap: 5, padding: '5px 10px', borderRadius: 5, fontSize: 10,
-    border: '1px solid var(--color-border)',
-    background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
-    color: 'var(--color-accent)', cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
-    fontWeight: 600,
-  }
-  const disabledBtn: React.CSSProperties = { ...calcBtn, opacity: 0.5, cursor: 'not-allowed' }
-
   return (
     <div ref={panelRef} style={{ position: 'relative', flexShrink: 0 }}>
 
@@ -311,9 +301,9 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
           borderLeft: '1px solid var(--color-border)',
           borderBottom: '1px solid var(--color-border)',
           background: hasResults
-            ? 'color-mix(in srgb, #38bdf8 10%, transparent)'
+            ? `color-mix(in srgb, ${PARATOPE_COLOR} 10%, transparent)`
             : 'var(--color-secondary-bg)',
-          color: hasResults ? '#38bdf8' : 'var(--color-text-secondary)',
+          color: hasResults ? PARATOPE_COLOR : 'var(--color-text-secondary)',
           cursor: 'pointer', fontSize: 10, fontFamily: 'Outfit, sans-serif',
         }}
       >
@@ -321,7 +311,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
         Interface
         {hasResults && (
           <span style={{
-            background: '#38bdf8', color: '#040812', borderRadius: 8,
+            background: PARATOPE_COLOR, color: '#040812', borderRadius: 8,
             padding: '0 4px', fontSize: 9, fontWeight: 700, lineHeight: '14px',
           }}>
             {paratope.size + epitope.size}
@@ -337,8 +327,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
           border: '1px solid var(--color-border)',
           borderRadius: 8,
           boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
-          width: 300,
-          padding: 14,
+          width: 300, padding: 14,
           display: 'flex', flexDirection: 'column', gap: 12,
         }}>
 
@@ -371,9 +360,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
               </span>
             </div>
             <input
-              type="range"
-              min={2} max={12} step={0.5}
-              value={cutoff}
+              type="range" min={2} max={12} step={0.5} value={cutoff}
               onChange={e => useInterfaceStore.getState().setCutoff(parseFloat(e.target.value))}
               style={{ width: '100%', accentColor: 'var(--color-accent)' }}
             />
@@ -385,9 +372,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
             {(['all-heavy', 'backbone'] as const).map(scope => (
               <label key={scope} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                 <input
-                  type="radio"
-                  name="atomScope"
-                  value={scope}
+                  type="radio" name="atomScope" value={scope}
                   checked={atomScope === scope}
                   onChange={() => useInterfaceStore.getState().setAtomScope(scope)}
                   style={{ accentColor: 'var(--color-accent)' }}
@@ -401,7 +386,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
 
           {/* Error */}
           {lastError && (
-            <div style={{ fontSize: 10, color: '#f87171', padding: '4px 8px', borderRadius: 4, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.25)' }}>
+            <div style={{ fontSize: 10, color: EPITOPE_COLOR, padding: '4px 8px', borderRadius: 4, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.25)' }}>
               {lastError}
             </div>
           )}
@@ -409,10 +394,10 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
           {/* Results summary */}
           {hasResults && (
             <div style={{ display: 'flex', gap: 8 }}>
-              <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, background: 'rgba(56,189,248,0.12)', color: '#38bdf8', border: '1px solid rgba(56,189,248,0.25)' }}>
+              <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, background: 'rgba(56,189,248,0.12)', color: PARATOPE_COLOR, border: `1px solid ${PARATOPE_COLOR}40` }}>
                 Paratope: {paratope.size} res
               </span>
-              <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.25)' }}>
+              <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, background: 'rgba(248,113,113,0.12)', color: EPITOPE_COLOR, border: `1px solid ${EPITOPE_COLOR}40` }}>
                 Epitope: {epitope.size} res
               </span>
             </div>
@@ -420,19 +405,10 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
 
           {/* Action buttons */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <button
-              onClick={handleCalculate}
-              disabled={isCalculating}
-              style={isCalculating ? disabledBtn : calcBtn}
-            >
+            <button onClick={handleCalculate} disabled={isCalculating} style={isCalculating ? disabledBtn : calcBtn}>
               {isCalculating && !batchProgress ? '⏳ Calculating…' : '⚡ Calculate — this structure'}
             </button>
-
-            <button
-              onClick={handleBatch}
-              disabled={isCalculating}
-              style={isCalculating ? disabledBtn : { ...calcBtn, background: 'transparent', color: 'var(--color-text-secondary)' }}
-            >
+            <button onClick={handleBatch} disabled={isCalculating} style={isCalculating ? disabledBtn : secondaryBtn}>
               {batchProgress
                 ? `⏳ ${batchProgress.done} / ${batchProgress.total} files…`
                 : '📊 Batch all files → Metrics'

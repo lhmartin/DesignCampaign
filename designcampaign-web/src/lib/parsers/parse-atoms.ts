@@ -7,7 +7,7 @@ export interface AtomRecord {
   z: number
 }
 
-const BACKBONE_ATOMS = new Set(['N', 'CA', 'C', 'O'])
+export const BACKBONE_ATOMS = new Set(['N', 'CA', 'C', 'O'])
 
 /**
  * Parse ATOM/HETATM records from a PDB text for the given chains.

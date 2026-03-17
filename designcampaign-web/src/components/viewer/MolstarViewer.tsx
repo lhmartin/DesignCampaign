@@ -9,6 +9,7 @@ import { useInterfaceStore } from '@/stores/interface-store'
 import { readFileContent } from '@/lib/fsa'
 import { type ChainSequence, THREE_TO_ONE } from '@/lib/sequence'
 import { getFileFormat } from '@/lib/utils'
+import { syncToMolstar } from '@/lib/mol-selection-sync'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -335,7 +336,14 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
     const [seqData, setSeqData] = useState<{ seq: ChainSequence[]; values: Map<string, number> }>(
       { seq: [], values: new Map() }
     )
-    const { toggleResidue, addResidue, clearSelection } = useSelectionStore()
+    const { toggleResidue, addResidue, clearSelection, selectedResidues } = useSelectionStore()
+
+    // Sync selection store → 3D viewer so external selectAll() calls (InterfaceGroup, etc.) highlight in Mol*.
+    // SequenceViewer handles its own click-driven sync; this handles all other sources.
+    useEffect(() => {
+      if (!plugin) return
+      syncToMolstar(plugin, Array.from(selectedResidues))
+    }, [plugin, selectedResidues])
 
     // Subscribe to Mol* state changes to extract sequence automatically.
     // Debounced: applyPreset fires many intermediate state events — wait for them to settle.
@@ -623,7 +631,7 @@ function extractSequenceFromPlugin(plugin: PluginUIContext): { seq: ChainSequenc
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
 /** Batch-update all representations in the given structures (or all loaded ones) in a single task. */
-async function applyToAllRepresentations(
+export async function applyToAllRepresentations(
   plugin: PluginUIContext,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   updateFn: (old: any) => any,
