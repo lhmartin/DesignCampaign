@@ -511,7 +511,7 @@ export function FilterPanel() {
   const numericColumns = allColumns.filter(c => c !== 'paratope_residues' && c !== 'epitope_residues')
 
   const activeRuleCount = rules.filter(r =>
-    r.type === 'numeric' ? !!r.metric : !!r.residues.trim()
+    r.type === 'residue' ? !!(r.residues?.trim()) : !!(r as NumericFilterRule).metric
   ).length
   const activeRankingCount = rankingMetrics.filter(m => m.active).length
 

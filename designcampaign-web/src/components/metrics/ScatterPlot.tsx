@@ -1,7 +1,7 @@
 import { useEffect, useRef, useMemo, useState, type RefObject } from 'react'
 import { useMetricsStore } from '@/stores/metrics-store'
 import { useFileStore } from '@/stores/file-store'
-import { useFilterStore } from '@/stores/filter-store'
+import { useFilterStore, type NumericFilterRule } from '@/stores/filter-store'
 import type { MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
 import { shortLabel } from '@/lib/metrics-labels'
 
@@ -141,7 +141,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     if (!xAxis || !yAxis || rows.length === 0) return null
 
     const hasFilters = !!filterText || filterRules.some(r =>
-      r.type === 'numeric' ? !!r.metric : !!r.residues.trim()
+      r.type === 'residue' ? !!(r.residues?.trim()) : !!(r as NumericFilterRule).metric
     )
 
     const { passesFilters } = useFilterStore.getState()
