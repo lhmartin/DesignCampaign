@@ -14,6 +14,7 @@ import type { MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
 import { readFileContent } from '@/lib/fsa'
 import { BUILTIN_LABELS, shortLabel } from '@/lib/metrics-labels'
 import { downloadBlob } from '@/lib/utils'
+import { useBatchInterfaceStore, residueNumbersFromKeys } from '@/stores/batch-interface-store'
 
 const helper = createColumnHelper<ProteinMetrics>()
 
@@ -266,8 +267,52 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
 
   // Name column is rendered LAST — metric columns come first
   const columns = useMemo(() => [
-    ...visibleColumns.map(col =>
-      helper.accessor(row => row.metrics[col], {
+    ...visibleColumns.map(col => {
+      // Virtual columns: paratope_residues and epitope_residues
+      if (col === 'paratope_residues' || col === 'epitope_residues') {
+        const target = col === 'paratope_residues' ? 'paratope' : 'epitope'
+        return helper.accessor(
+          row => {
+            const res = useBatchInterfaceStore.getState().results[row.filePath ?? '']
+            return res ? residueNumbersFromKeys(res[target]) : undefined
+          },
+          {
+            id: col,
+            header: () => col === 'paratope_residues' ? 'Paratope' : 'Epitope',
+            cell: info => {
+              const nums = info.getValue() as number[] | undefined
+              if (!nums || nums.length === 0)
+                return <span style={{ color: 'var(--color-text-disabled)' }}>—</span>
+              return (
+                <span
+                  title={nums.join(', ')}
+                  style={{
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontSize: 10,
+                    color: col === 'paratope_residues' ? '#38bdf8' : '#f87171',
+                    maxWidth: 120,
+                    display: 'inline-block',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    verticalAlign: 'bottom',
+                  }}
+                >
+                  {nums.join(', ')}
+                </span>
+              )
+            },
+            sortingFn: (a, b) => {
+              const na = (a.getValue(col) as number[] | undefined)?.length ?? 0
+              const nb = (b.getValue(col) as number[] | undefined)?.length ?? 0
+              return na - nb
+            },
+          }
+        )
+      }
+
+      // Generic numeric column
+      return helper.accessor(row => row.metrics[col], {
         id: col,
         header: shortLabel(col),
         cell: info => {
@@ -278,7 +323,7 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
         },
         sortingFn: 'alphanumeric',
       })
-    ),
+    }),
     // Name last
     helper.accessor('name', {
       header: 'Name',
@@ -287,7 +332,7 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
       ),
       size: 200,
     }),
-  ], [visibleColumns, renameRow])
+  ], [visibleColumns, renameRow]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const table = useReactTable({
     data: filteredRows,

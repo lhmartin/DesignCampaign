@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
-import { useFilterStore, type ComparisonOp, type RankingMode, type RankingMetric } from '@/stores/filter-store'
+import { useFilterStore, type ComparisonOp, type RankingMode, type RankingMetric, type FilterRule, type NumericFilterRule, type ResidueFilterRule } from '@/stores/filter-store'
 import { useMetricsStore, type ProteinMetrics } from '@/stores/metrics-store'
+import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
 import { shortLabel } from '@/lib/metrics-labels'
 import { downloadBlob } from '@/lib/utils'
 
@@ -122,12 +123,12 @@ function SmallBtn({
   )
 }
 
-// ─── Filter rule row ──────────────────────────────────────────────────────────
+// ─── Numeric filter rule row ──────────────────────────────────────────────────
 
-function FilterRuleRow({
+function NumericRuleRow({
   rule, allColumns,
 }: {
-  rule: { id: string; metric: string; op: ComparisonOp; value: number }
+  rule: NumericFilterRule
   allColumns: string[]
 }) {
   const { updateRule, removeRule } = useFilterStore.getState()
@@ -210,6 +211,105 @@ function FilterRuleRow({
       </button>
     </div>
   )
+}
+
+// ─── Residue filter rule row ──────────────────────────────────────────────────
+
+function ResidueRuleRow({ rule }: { rule: ResidueFilterRule }) {
+  const { updateRule, removeRule } = useFilterStore.getState()
+  const hasBatchData = useBatchInterfaceStore(s => Object.keys(s.results).length > 0)
+  const selStyle: React.CSSProperties = {
+    fontSize: 11,
+    fontFamily: 'Outfit, sans-serif',
+    color: 'var(--color-text-primary)',
+    background: 'var(--color-background)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 4,
+    padding: '2px 18px 2px 5px',
+    outline: 'none',
+    cursor: 'pointer',
+    flexShrink: 0,
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 12px' }}>
+      {/* Target: paratope / epitope */}
+      <select
+        value={rule.target}
+        onChange={e => updateRule(rule.id, { target: e.target.value as 'paratope' | 'epitope' })}
+        style={{ ...selStyle, flexShrink: 0, width: 82 }}
+      >
+        <option value="paratope">Paratope</option>
+        <option value="epitope">Epitope</option>
+      </select>
+
+      {/* Residues text input */}
+      <input
+        type="text"
+        value={rule.residues}
+        placeholder="45, A:67, …"
+        onChange={e => updateRule(rule.id, { residues: e.target.value })}
+        title="Comma-separated residue numbers or chain:number pairs, e.g. '45, A:67'"
+        style={{
+          flex: 1, minWidth: 0,
+          fontSize: 11, fontFamily: 'JetBrains Mono, monospace',
+          color: 'var(--color-text-primary)',
+          background: 'var(--color-background)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 4,
+          padding: '2px 5px',
+          outline: 'none',
+        }}
+      />
+
+      {/* ANY / ALL toggle */}
+      <button
+        onClick={() => updateRule(rule.id, { mode: rule.mode === 'any' ? 'all' : 'any' })}
+        title={rule.mode === 'any' ? 'ANY: at least one residue must be present — click to require ALL' : 'ALL: every residue must be present — click to require ANY'}
+        style={{
+          fontSize: 9, fontWeight: 700,
+          padding: '2px 5px',
+          borderRadius: 4,
+          border: '1px solid var(--color-border)',
+          background: 'transparent',
+          color: 'var(--color-text-secondary)',
+          cursor: 'pointer',
+          flexShrink: 0,
+          letterSpacing: '0.05em',
+        }}
+      >
+        {rule.mode === 'any' ? 'ANY' : 'ALL'}
+      </button>
+
+      {/* No batch data warning */}
+      {!hasBatchData && (
+        <span
+          title="Run batch interface calculation first"
+          style={{ fontSize: 10, color: '#f87171', flexShrink: 0 }}
+        >⚠</span>
+      )}
+
+      {/* Remove */}
+      <button
+        onClick={() => removeRule(rule.id)}
+        title="Remove rule"
+        style={{
+          width: 18, height: 18,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: 3, border: 'none', background: 'none',
+          color: 'var(--color-text-disabled)', cursor: 'pointer',
+          fontSize: 13, flexShrink: 0, padding: 0,
+        }}
+      >×</button>
+    </div>
+  )
+}
+
+// ─── Filter rule row dispatcher ───────────────────────────────────────────────
+
+function FilterRuleRow({ rule, allColumns }: { rule: FilterRule; allColumns: string[] }) {
+  if (rule.type === 'residue') return <ResidueRuleRow rule={rule} />
+  return <NumericRuleRow rule={rule} allColumns={allColumns} />
 }
 
 // ─── Ranking metric row ───────────────────────────────────────────────────────
@@ -376,7 +476,7 @@ export function FilterPanel() {
 
   // Actions are stable references — no reactive subscription needed.
   const {
-    addRule, clearRules, setRankingMode, syncRankingMetrics,
+    addRule, addResidueRule, clearRules, setRankingMode, syncRankingMetrics,
     toggleShowFilteredInBrowser, savePreset, importPresetJSON,
   } = useFilterStore.getState()
   const { injectColumn } = useMetricsStore.getState()
@@ -407,7 +507,12 @@ export function FilterPanel() {
     injectColumn('rank_score', scores)
   }
 
-  const activeRuleCount = rules.filter(r => r.metric).length
+  // Filter out virtual columns from numeric filter rule dropdowns
+  const numericColumns = allColumns.filter(c => c !== 'paratope_residues' && c !== 'epitope_residues')
+
+  const activeRuleCount = rules.filter(r =>
+    r.type === 'numeric' ? !!r.metric : !!r.residues.trim()
+  ).length
   const activeRankingCount = rankingMetrics.filter(m => m.active).length
 
   return (
@@ -449,17 +554,16 @@ export function FilterPanel() {
           </p>
         ) : (
           rules.map(r => (
-            <FilterRuleRow key={r.id} rule={r} allColumns={allColumns} />
+            <FilterRuleRow key={r.id} rule={r} allColumns={numericColumns} />
           ))
         )}
       </div>
 
       {/* Add / Clear buttons */}
       <div style={{ display: 'flex', gap: 6, padding: '0 12px 10px', alignItems: 'center' }}>
-        <SmallBtn onClick={addRule} variant="accent">+ Add rule</SmallBtn>
-        {rules.length > 0 && (
-          <SmallBtn onClick={clearRules} variant="danger">Clear all</SmallBtn>
-        )}
+        <SmallBtn onClick={addRule} variant="accent">+ Metric</SmallBtn>
+        <SmallBtn onClick={addResidueRule} variant="accent">+ Residue</SmallBtn>
+        {rules.length > 0 && <SmallBtn onClick={clearRules} variant="danger">Clear all</SmallBtn>}
       </div>
 
       {/* File browser toggle */}

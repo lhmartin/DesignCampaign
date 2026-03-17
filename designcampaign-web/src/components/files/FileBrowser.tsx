@@ -323,9 +323,9 @@ function FileRow({
   const { showFilteredInBrowser, rules, passesFilters } = useFilterStore()
   const metrics = useMetricsStore(s => s.rows.find(r => r.filePath === file.path)?.metrics)
   const isFilteredOut = showFilteredInBrowser
-    && rules.some(r => r.metric)
+    && rules.some(r => r.type === 'numeric' ? !!r.metric : !!r.residues?.trim())
     && metrics !== undefined
-    && !passesFilters(metrics)
+    && !passesFilters(metrics, file.path)
 
   return (
     <button

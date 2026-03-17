@@ -3,6 +3,7 @@ import { useInterfaceStore } from '@/stores/interface-store'
 import { useGroupStore } from '@/stores/group-store'
 import { useFileStore } from '@/stores/file-store'
 import { useMetricsStore } from '@/stores/metrics-store'
+import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
 import { extractAtomsFromPlugin, computeContacts } from '@/lib/interface-calc'
 import { parseAtoms } from '@/lib/parsers/parse-atoms'
 import { readFileContent } from '@/lib/fsa'
@@ -248,6 +249,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
     store.setCalculating(true)
 
     const batchResults: Array<{ filePath: string; name: string; metrics: Record<string, number> }> = []
+    const interfaceData: Record<string, { paratope: string[]; epitope: string[] }> = {}
 
     try {
       for (let i = 0; i < files.length; i += BATCH_SIZE) {
@@ -260,11 +262,12 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
         for (let j = 0; j < batch.length; j++) {
           const text = texts[j]
           if (!text) continue
+          const filePath = batch[j].path
           const binderAtoms = parseAtoms(text, binderChains, atomScope)
           const targetAtoms = parseAtoms(text, targetChains, atomScope)
           const result      = computeContacts(binderAtoms, targetAtoms, cutoff)
           batchResults.push({
-            filePath: batch[j].path,
+            filePath,
             name:     getFileStem(batch[j].name),   // matches the name used by calculateAll
             metrics: {
               n_paratope: result.paratope.size,
@@ -272,6 +275,10 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
               n_contacts: result.nContacts,
             },
           })
+          interfaceData[filePath] = {
+            paratope: Array.from(result.paratope),
+            epitope:  Array.from(result.epitope),
+          }
         }
         // Throttle progress updates and yield to UI thread each batch
         setBatchProgress({ done: Math.min(i + BATCH_SIZE, files.length), total: files.length })
@@ -281,6 +288,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
       // Single upsert — creates rows for files not yet in the metrics table,
       // or merges columns into existing rows matched by filePath then name.
       useMetricsStore.getState().batchInjectResults(batchResults)
+      useBatchInterfaceStore.getState().setBatchResults(interfaceData)
     } catch (err) {
       store.setError(err instanceof Error ? err.message : 'Batch failed')
     } finally {

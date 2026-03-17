@@ -1,16 +1,28 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { useBatchInterfaceStore } from './batch-interface-store'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type ComparisonOp = '>' | '>=' | '<' | '<=' | '='
 
-export interface FilterRule {
+export interface NumericFilterRule {
   id: string
+  type: 'numeric'
   metric: string
   op: ComparisonOp
   value: number
 }
+
+export interface ResidueFilterRule {
+  id: string
+  type: 'residue'
+  target: 'paratope' | 'epitope'
+  residues: string
+  mode: 'any' | 'all'
+}
+
+export type FilterRule = NumericFilterRule | ResidueFilterRule
 
 export type RankingMode = 'borda' | 'weighted-sum'
 
@@ -29,13 +41,34 @@ export interface FilterPreset {
   rankingMetrics: RankingMetric[]
 }
 
+// ─── Residue matching helpers ─────────────────────────────────────────────────
+
+function parseResidueSpec(spec: string): { chain?: string; resId: number } | null {
+  spec = spec.trim()
+  if (!spec) return null
+  const sep = spec.lastIndexOf(':')
+  if (sep > 0 && sep < spec.length - 1) {
+    const resId = parseInt(spec.slice(sep + 1), 10)
+    return isNaN(resId) ? null : { chain: spec.slice(0, sep), resId }
+  }
+  const resId = parseInt(spec, 10)
+  return isNaN(resId) ? null : { resId }
+}
+
+function residueKeyMatches(spec: { chain?: string; resId: number }, key: string): boolean {
+  const sep = key.lastIndexOf(':')
+  if (spec.chain !== undefined && spec.chain !== key.slice(0, sep)) return false
+  return spec.resId === parseInt(key.slice(sep + 1), 10)
+}
+
 // ─── Store interface ──────────────────────────────────────────────────────────
 
 interface FilterStore {
   // Filter rules
   rules: FilterRule[]
   addRule: () => void
-  updateRule: (id: string, patch: Partial<FilterRule>) => void
+  addResidueRule: () => void
+  updateRule: (id: string, patch: Partial<NumericFilterRule> | Partial<ResidueFilterRule>) => void
   removeRule: (id: string) => void
   clearRules: () => void
 
@@ -60,10 +93,12 @@ interface FilterStore {
   importPresetJSON: (json: string) => void
 
   // Pure helper — callable outside React
-  passesFilters: (metrics: Record<string, number>) => boolean
+  passesFilters: (metrics: Record<string, number>, filePath?: string | null) => boolean
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
+
+const VIRTUAL_COLS = new Set(['paratope_residues', 'epitope_residues'])
 
 export const useFilterStore = create<FilterStore>()(
   persist(
@@ -79,14 +114,25 @@ export const useFilterStore = create<FilterStore>()(
       addRule: () => set(s => ({
         rules: [...s.rules, {
           id: crypto.randomUUID(),
+          type: 'numeric' as const,
           metric: '',
           op: '>=' as ComparisonOp,
           value: 0,
         }],
       })),
 
+      addResidueRule: () => set(s => ({
+        rules: [...s.rules, {
+          id: crypto.randomUUID(),
+          type: 'residue' as const,
+          target: 'paratope' as const,
+          residues: '',
+          mode: 'any' as const,
+        }],
+      })),
+
       updateRule: (id, patch) => set(s => ({
-        rules: s.rules.map(r => r.id === id ? { ...r, ...patch } : r),
+        rules: s.rules.map(r => r.id === id ? { ...r, ...patch } as FilterRule : r),
       })),
 
       removeRule: (id) => set(s => ({ rules: s.rules.filter(r => r.id !== id) })),
@@ -105,7 +151,7 @@ export const useFilterStore = create<FilterStore>()(
         const { rankingMetrics } = get()
         const existing = new Set(rankingMetrics.map(m => m.metric))
         const added: RankingMetric[] = allColumns
-          .filter(c => !existing.has(c))
+          .filter(c => !existing.has(c) && !VIRTUAL_COLS.has(c))
           .map(c => ({ metric: c, weight: 0.5, direction: 'max' as const, active: false }))
         if (added.length === 0) return   // nothing new — skip set() to avoid spurious re-renders
         set({ rankingMetrics: [...rankingMetrics, ...added] })
@@ -165,19 +211,41 @@ export const useFilterStore = create<FilterStore>()(
 
       // ── Pure helper ───────────────────────────────────────────────────────
 
-      passesFilters: (metrics) => {
+      passesFilters: (metrics, filePath) => {
         const { rules } = get()
         if (rules.length === 0) return true
         return rules.every(r => {
-          if (!r.metric) return true               // blank rule → pass
-          const v = metrics[r.metric]
-          if (v === undefined) return true         // no data → pass (don't penalise missing)
-          switch (r.op) {
-            case '>':  return v >  r.value
-            case '>=': return v >= r.value
-            case '<':  return v <  r.value
-            case '<=': return v <= r.value
-            case '=':  return v === r.value
+          // Handle legacy persisted rules that have no `type` field — treat as numeric
+          const ruleType = (r as FilterRule).type ?? 'numeric'
+
+          if (ruleType === 'residue') {
+            const residueRule = r as ResidueFilterRule
+            if (!residueRule.residues.trim()) return true
+            if (!filePath) return true
+            const batchResult = useBatchInterfaceStore.getState().results[filePath]
+            if (!batchResult) return true
+            const keys = residueRule.target === 'paratope' ? batchResult.paratope : batchResult.epitope
+            const specs = residueRule.residues
+              .split(',')
+              .map(parseResidueSpec)
+              .filter((s): s is NonNullable<typeof s> => s !== null)
+            if (specs.length === 0) return true
+            return residueRule.mode === 'any'
+              ? specs.some(spec => keys.some(key => residueKeyMatches(spec, key)))
+              : specs.every(spec => keys.some(key => residueKeyMatches(spec, key)))
+          }
+
+          // Numeric rule (or legacy rule without type)
+          const numericRule = r as NumericFilterRule
+          if (!numericRule.metric) return true               // blank rule → pass
+          const v = metrics[numericRule.metric]
+          if (v === undefined) return true                   // no data → pass
+          switch (numericRule.op) {
+            case '>':  return v >  numericRule.value
+            case '>=': return v >= numericRule.value
+            case '<':  return v <  numericRule.value
+            case '<=': return v <= numericRule.value
+            case '=':  return v === numericRule.value
             default:   return true
           }
         })

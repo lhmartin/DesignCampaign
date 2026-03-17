@@ -5,9 +5,11 @@ export const BUILTIN_LABELS: Record<string, string> = {
   num_residues: 'Residues',
   chain_count:  'Chains',
   rank_score:   'Rank Score',
-  n_paratope:   'Paratope res.',
-  n_epitope:    'Epitope res.',
-  n_contacts:   'Atom contacts',
+  n_paratope:        'Paratope res.',
+  n_epitope:         'Epitope res.',
+  n_contacts:        'Atom contacts',
+  paratope_residues: 'Paratope residues',
+  epitope_residues:  'Epitope residues',
 }
 
 /** Short display label for a column key. */

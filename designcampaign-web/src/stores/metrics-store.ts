@@ -187,7 +187,7 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
   })),
 
   batchInjectResults: (data) => set(s => {
-    const newCols: string[] = []
+    const newCols: string[] = ['paratope_residues', 'epitope_residues']
     const incoming: ProteinMetrics[] = data.map(({ filePath, name, metrics }) => {
       for (const k of Object.keys(metrics)) if (!newCols.includes(k)) newCols.push(k)
       return { name, filePath, metrics }

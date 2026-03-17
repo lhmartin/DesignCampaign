@@ -140,13 +140,15 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
   const plotSpec = useMemo(() => {
     if (!xAxis || !yAxis || rows.length === 0) return null
 
-    const hasFilters = !!filterText || filterRules.some(r => r.metric)
+    const hasFilters = !!filterText || filterRules.some(r =>
+      r.type === 'numeric' ? !!r.metric : !!r.residues.trim()
+    )
 
     const { passesFilters } = useFilterStore.getState()
     const active = hasFilters
       ? rows.filter(r => {
           const textOk = !filterText || r.name.toLowerCase().includes(filterText.toLowerCase())
-          return textOk && passesFilters(r.metrics)
+          return textOk && passesFilters(r.metrics, r.filePath)
         })
       : rows
     const activeSet = new Set(active)
@@ -181,11 +183,11 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
       hovertemplate: `<b>%{text}</b><br>${xAxis}: %{x:.3f}<br>${yAxis}: %{y:.3f}<extra></extra>`,
     })
 
-    // ── Filter cutoff lines (on-axis only) ──────────────────────────────────
+    // ── Filter cutoff lines (on-axis only, numeric rules only) ──────────────
     const shapes: object[] = []
     const lineStyle = { color: 'rgba(248,113,113,0.65)', width: 1.5, dash: 'dash' }
     for (const rule of filterRules) {
-      if (!rule.metric) continue
+      if (rule.type !== 'numeric' || !rule.metric) continue
       if (rule.metric === xAxis) {
         shapes.push({
           type: 'line',
