@@ -3,7 +3,7 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.designcampaign.app",
   "productName": "DesignCampaign",
-  "copyright": "Copyright © 2024",
+  "copyright": "Copyright © 2025",
   "asar": true,
 
   "publish": [{
@@ -33,10 +33,10 @@
       { "target": "nsis", "arch": ["x64"] },
       { "target": "portable", "arch": ["x64"] }
     ],
-    "artifactName": "${productName}-Windows-${version}-${arch}.${ext}",
     "requestedExecutionLevel": "asInvoker"
   },
   "nsis": {
+    "artifactName": "${productName}-Windows-Setup-${version}-${arch}.${ext}",
     "oneClick": false,
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,
@@ -44,6 +44,9 @@
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "DesignCampaign"
+  },
+  "portable": {
+    "artifactName": "${productName}-Windows-Portable-${version}-${arch}.${ext}"
   },
 
   "mac": {
