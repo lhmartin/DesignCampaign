@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { FileInfo } from '@/types/electron'
 import { APP_DEFAULTS } from '@/lib/constants/app'
 
@@ -15,7 +16,9 @@ interface FileStore {
   setFolder: (folder: string) => Promise<void>
 }
 
-export const useFileStore = create<FileStore>((set, get) => ({
+export const useFileStore = create<FileStore>()(
+  persist(
+    (set, get) => ({
   currentFolder: null,
   files: [],
   activeFile: null,
@@ -89,4 +92,10 @@ export const useFileStore = create<FileStore>((set, get) => ({
   setActiveFile: (path: string | null) => {
     set({ activeFile: path })
   },
-}))
+    }),
+    {
+      name: 'dc-file-store',
+      partialize: (s) => ({ currentFolder: s.currentFolder }),
+    },
+  ),
+)

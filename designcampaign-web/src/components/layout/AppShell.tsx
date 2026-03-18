@@ -26,13 +26,19 @@ const cardStyle: React.CSSProperties = {
 
 export function AppShell() {
   const viewerRef = useRef<MolstarViewerHandle>(null)
-  const { activeFile } = useFileStore()
+  const { activeFile, currentFolder, setFolder } = useFileStore()
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
   }, [isDark])
+
+  // Auto-restore last folder on startup (currentFolder hydrated by zustand-persist)
+  useEffect(() => {
+    if (currentFolder) setFolder(currentFolder)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // intentionally runs once on mount
 
   return (
     <div style={{

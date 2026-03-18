@@ -9,7 +9,8 @@
   "publish": [{
     "provider": "github",
     "owner": "lhmartin",
-    "repo": "DesignCampaign"
+    "repo": "DesignCampaign",
+    "releaseType": "release"
   }],
 
   "directories": {

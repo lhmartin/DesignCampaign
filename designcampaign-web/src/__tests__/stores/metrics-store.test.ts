@@ -303,3 +303,61 @@ describe('calculateAll', () => {
     expect(useMetricsStore.getState().rows.find(r => r.name === 'good')).toBeDefined()
   })
 })
+
+// ─── exportFilteredCSV ────────────────────────────────────────────────────────
+
+describe('exportFilteredCSV', () => {
+  beforeEach(() => {
+    useMetricsStore.getState().clearAll()
+    // Restore default hiddenColumns since clearAll doesn't reset it
+    useMetricsStore.getState().setHiddenColumns([])
+    useMetricsStore.getState().setFilterText('')
+  })
+
+  it('exports all rows when no filter is active', () => {
+    useMetricsStore.getState().addRow({ name: 'p1', filePath: null, metrics: { score: 0.9 } })
+    useMetricsStore.getState().addRow({ name: 'p2', filePath: null, metrics: { score: 0.5 } })
+    const csv = useMetricsStore.getState().exportFilteredCSV()
+    const lines = csv.trim().split('\n')
+    expect(lines).toHaveLength(3) // header + 2 data rows
+    expect(lines[0]).toContain('name')
+    expect(lines[0]).toContain('score')
+    expect(lines[1]).toContain('p1')
+    expect(lines[2]).toContain('p2')
+  })
+
+  it('exports only filtered rows when filterText is set', () => {
+    useMetricsStore.getState().addRow({ name: 'alpha', filePath: null, metrics: { score: 0.9 } })
+    useMetricsStore.getState().addRow({ name: 'beta',  filePath: null, metrics: { score: 0.5 } })
+    useMetricsStore.getState().setFilterText('alpha')
+    const csv = useMetricsStore.getState().exportFilteredCSV()
+    const lines = csv.trim().split('\n')
+    expect(lines).toHaveLength(2) // header + 1 data row
+    expect(lines[1]).toContain('alpha')
+    expect(csv).not.toContain('beta')
+  })
+
+  it('excludes hidden columns from the export', () => {
+    useMetricsStore.getState().addRow({ name: 'p1', filePath: null, metrics: { score: 0.9, binding_energy: 85 } })
+    useMetricsStore.getState().setHiddenColumns(['binding_energy'])
+    const csv = useMetricsStore.getState().exportFilteredCSV()
+    expect(csv).toContain('score')
+    expect(csv).not.toContain('binding_energy')
+  })
+
+  it('rounds metric values to 4 decimal places', () => {
+    useMetricsStore.getState().addRow({ name: 'p1', filePath: null, metrics: { score: 0.123456789 } })
+    const csv = useMetricsStore.getState().exportFilteredCSV()
+    expect(csv).toContain('0.1235')
+    expect(csv).not.toContain('0.123456789')
+  })
+
+  it('produces empty body (header only) when all rows are filtered out', () => {
+    useMetricsStore.getState().addRow({ name: 'p1', filePath: null, metrics: { score: 0.9 } })
+    useMetricsStore.getState().setFilterText('no-match')
+    const csv = useMetricsStore.getState().exportFilteredCSV()
+    const lines = csv.trim().split('\n')
+    expect(lines).toHaveLength(1) // header only
+    expect(lines[0]).toContain('name')
+  })
+})

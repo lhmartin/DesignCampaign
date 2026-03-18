@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { FileInfo } from '@/types/electron'
 import { parseChainSequences } from '@/lib/parsers/pdb-sequence'
 
@@ -117,7 +118,9 @@ function computeGroups(hashResults: Map<string, ChainHashResult>): {
   return { groups, ungrouped: ungrouped.sort() }
 }
 
-export const useGroupStore = create<GroupStore>((set, get) => ({
+export const useGroupStore = create<GroupStore>()(
+  persist(
+    (set, get) => ({
   hashResults: new Map(),
   groups: [],
   ungrouped: [],
@@ -168,4 +171,10 @@ export const useGroupStore = create<GroupStore>((set, get) => ({
 
     set({ isGrouping: false, progress: 1 })
   },
-}))
+    }),
+    {
+      name: 'dc-group-prefs',
+      partialize: (s) => ({ viewMode: s.viewMode }),
+    },
+  ),
+)

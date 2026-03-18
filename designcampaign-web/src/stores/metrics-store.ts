@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { FileInfo } from '@/types/electron'
 import { extractMetricsFromPDB } from '@/lib/parsers/pdb-metrics'
 import { getFileStem } from '@/lib/utils'
@@ -30,6 +31,8 @@ interface MetricsStore {
   /** Like importJSON but always associates the result with a specific filePath + name */
   importJSONSidecar: (text: string, filePath: string, name: string) => void
   exportCSV: () => string
+  /** Export only filtered rows, respecting hidden columns. */
+  exportFilteredCSV: () => string
   setFilterText: (t: string) => void
   setColumnRange: (col: string, min: number | null, max: number | null) => void
   toggleColumn: (col: string) => void
@@ -161,7 +164,9 @@ function extractNumericMetrics(data: unknown): Record<string, number> {
   return out
 }
 
-export const useMetricsStore = create<MetricsStore>((set, get) => ({
+export const useMetricsStore = create<MetricsStore>()(
+  persist(
+    (set, get) => ({
   rows: [],
   allColumns: BUILTIN_COLS,
   hiddenColumns: [],
@@ -374,6 +379,17 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
     return header + '\n' + body
   },
 
+  exportFilteredCSV: () => {
+    const { hiddenColumns, allColumns } = get()
+    const filteredRows = get().getFilteredRows()
+    const visibleCols = allColumns.filter(c => !hiddenColumns.includes(c))
+    const header = ['name', ...visibleCols].join(',')
+    const body = filteredRows.map(r =>
+      [r.name, ...visibleCols.map(c => r.metrics[c]?.toFixed(4) ?? '')].join(',')
+    ).join('\n')
+    return header + '\n' + body
+  },
+
   setFilterText: (filterText) => set({ filterText }),
 
   setColumnRange: (col, min, max) =>
@@ -401,7 +417,13 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
       return true
     })
   },
-}))
+    }),
+    {
+      name: 'dc-metrics-prefs',
+      partialize: (s) => ({ hiddenColumns: s.hiddenColumns }),
+    },
+  ),
+)
 
 // ── Sidecar JSON parser ───────────────────────────────────────────────────────
 // Handles all three spec formats and stamps the result with the given filePath.

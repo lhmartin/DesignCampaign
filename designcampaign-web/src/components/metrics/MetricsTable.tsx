@@ -233,7 +233,7 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
   const {
     rows, allColumns, hiddenColumns, filterText, columnRanges,
     isCalculating, isLoadingSidecars, progress,
-    setFilterText, toggleColumn, setHiddenColumns, exportCSV, importCSV, importJSON,
+    setFilterText, toggleColumn, setHiddenColumns, exportCSV, exportFilteredCSV, importCSV, importJSON,
     getFilteredRows, calculateAll, renameRow,
   } = useMetricsStore()
   const { files } = useFileStore()
@@ -371,6 +371,18 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
     downloadBlob(exportCSV(), 'metrics.csv', 'text/csv')
   }
 
+  const handleExportFiltered = () => {
+    downloadBlob(exportFilteredCSV(), 'metrics_filtered.csv', 'text/csv')
+  }
+
+  const handleCopyPaths = async () => {
+    const paths = filteredRows
+      .map(r => r.filePath)
+      .filter((p): p is string => Boolean(p))
+      .join('\n')
+    await navigator.clipboard.writeText(paths)
+  }
+
   const handleCalculate = () => {
     const readFile = window.electronAPI
       ? (p: string) => window.electronAPI!.readFile(p)
@@ -405,11 +417,20 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
         </button>
         <input ref={fileInputRef} type="file" accept=".csv,.json" multiple className="hidden" onChange={handleImportFile} />
         <button
-          onClick={handleExport}
+          onClick={handleExportFiltered}
           disabled={filteredRows.length === 0}
+          title="Export filtered rows (visible columns only) as CSV"
           className="px-2 py-0.5 rounded border border-[var(--color-border)] hover:bg-[var(--color-secondary-bg)] disabled:opacity-50 transition-colors"
         >
           Export CSV
+        </button>
+        <button
+          onClick={handleCopyPaths}
+          disabled={filteredRows.filter(r => r.filePath).length === 0}
+          title="Copy file paths of filtered rows to clipboard (one per line)"
+          className="px-2 py-0.5 rounded border border-[var(--color-border)] hover:bg-[var(--color-secondary-bg)] disabled:opacity-50 transition-colors"
+        >
+          Copy paths
         </button>
 
         <ColumnsDropdown
