@@ -8,12 +8,12 @@ import { syncToMolstar } from '@/lib/mol-selection-sync'
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
-const CELL_W       = 12   // px per residue cell (tight — was 16)
+const CELL_W       = 10   // px per residue cell
 const NUM_H        = 11   // px for residue-number annotation row
 const AA_H         = 17   // px for amino-acid cell row
 const ROW_H        = NUM_H + AA_H   // 28 px per wrapped row
 const CHUNK        = 8    // residues per chunk
-const CHUNK_GAP    = 4    // px gap between chunks
+const CHUNK_GAP    = 2    // px gap between chunks
 const ROW_GAP      = 1    // px gap between wrapped rows
 const MAX_ROWS     = 6    // max visible rows before vertical scroll
 const CONTROLS_W   = 90   // px width of left colour-mode controls
@@ -122,25 +122,30 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
   const [dragEnd, setDragEnd]         = useState<Pos | null>(null)
   const mouseDownRef                  = useRef(false)
   const containerRef                  = useRef<HTMLDivElement>(null)
-  const [containerWidth, setContainerWidth] = useState(800)
+  const contentRef                    = useRef<HTMLDivElement>(null)
+  // contentRect.width from the scrollable content div already excludes padding
+  // and the vertical scrollbar — no manual offsets needed.
+  const [contentWidth, setContentWidth] = useState(600)
 
-  // Track container width for wrapping calculation
   useEffect(() => {
-    const el = containerRef.current
+    const el = contentRef.current
     if (!el) return
     const ro = new ResizeObserver(entries => {
       const w = Math.round(entries[0].contentRect.width)
-      setContainerWidth(prev => prev === w ? prev : w)
+      setContentWidth(prev => prev === w ? prev : w)
     })
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
 
-  // How many residues fit on one row
+  // How many residues fit on one row.
+  // contentWidth comes from contentRect.width on the scrollable div — already
+  // excludes padding and any vertical scrollbar, so only the chain pill needs
+  // to be subtracted.
   const residuesPerRow = useMemo(() => {
-    const usable = containerWidth - CONTROLS_W - CHAIN_PILL_W - 24  // 24 = left(4) + right(20) padding
+    const usable = contentWidth - CHAIN_PILL_W
     return Math.max(CHUNK, Math.floor(usable / CELL_W))
-  }, [containerWidth])
+  }, [contentWidth])
 
   // Live drag preview
   const dragKeys = useMemo<Set<string>>(() => {
@@ -281,11 +286,11 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
       </div>
 
       {/* ── Wrapped sequence rows (scrolls vertically) ── */}
-      <div style={{
+      <div ref={contentRef} style={{
         flex: 1,
         overflowY: 'auto',
         overflowX: 'hidden',
-        padding: '4px 20px 4px 4px',
+        padding: '4px 4px 4px 4px',
         display: 'flex',
         flexDirection: 'column',
         gap: ROW_GAP,
