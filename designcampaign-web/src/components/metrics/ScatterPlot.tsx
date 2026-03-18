@@ -24,6 +24,23 @@ function useIsDark(): boolean {
   return isDark
 }
 
+// Compute [min, max] extent of a column across rows, with 5% padding
+function dataExtent(rows: { metrics: Record<string, number | undefined> }[], col: string): [number, number] {
+  const vals: number[] = []
+  for (const r of rows) {
+    const v = r.metrics[col]
+    if (v != null && isFinite(v)) vals.push(v)
+  }
+  if (vals.length === 0) return [0, 1]
+  let mn = vals[0], mx = vals[0]
+  for (let i = 1; i < vals.length; i++) {
+    if (vals[i] < mn) mn = vals[i]
+    if (vals[i] > mx) mx = vals[i]
+  }
+  const pad = (mx - mn) * 0.05 || 0.05
+  return [+(mn - pad).toPrecision(4), +(mx + pad).toPrecision(4)]
+}
+
 // ── Styled select for the axis choosers ──────────────────────────────────────
 
 function AxisSelect({
@@ -75,6 +92,81 @@ function AxisSelect({
   )
 }
 
+// ── Axis range controls (auto toggle + min/max inputs) ────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: 60,
+  fontSize: 10,
+  fontFamily: 'JetBrains Mono, monospace',
+  color: 'var(--color-text-primary)',
+  background: 'var(--color-primary-bg)',
+  border: '1px solid var(--color-border)',
+  borderRadius: 3,
+  padding: '1px 4px',
+  outline: 'none',
+  textAlign: 'right' as const,
+}
+
+function RangeLimits({
+  label, isAuto, onAutoChange, min, max, onMinChange, onMaxChange,
+}: {
+  label: string
+  isAuto: boolean
+  onAutoChange: (auto: boolean) => void
+  min: string
+  max: string
+  onMinChange: (v: string) => void
+  onMaxChange: (v: string) => void
+}) {
+  const labelStyle: React.CSSProperties = {
+    fontSize: 9,
+    fontWeight: 700,
+    letterSpacing: '0.10em',
+    textTransform: 'uppercase',
+    color: 'var(--color-text-secondary)',
+    lineHeight: 1,
+  }
+  const dimStyle: React.CSSProperties = {
+    fontSize: 9,
+    color: 'var(--color-text-disabled)',
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span style={labelStyle}>{label}</span>
+      {/* Auto toggle */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', userSelect: 'none' }}>
+        <input
+          type="checkbox"
+          checked={isAuto}
+          onChange={e => onAutoChange(e.target.checked)}
+          style={{ accentColor: 'var(--color-accent)', cursor: 'pointer', width: 11, height: 11 }}
+        />
+        <span style={dimStyle}>auto</span>
+      </label>
+      {/* Manual range inputs */}
+      {!isAuto && (
+        <>
+          <input
+            type="number"
+            value={min}
+            onChange={e => onMinChange(e.target.value)}
+            placeholder="min"
+            style={inputStyle}
+          />
+          <span style={dimStyle}>–</span>
+          <input
+            type="number"
+            value={max}
+            onChange={e => onMaxChange(e.target.value)}
+            placeholder="max"
+            style={inputStyle}
+          />
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
@@ -84,39 +176,91 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
   const isDark = useIsDark()
 
   const plotRef = useRef<HTMLDivElement>(null)
-  const [xAxis, setXAxis] = useState('')
-  const [yAxis, setYAxis] = useState('')
 
-  // Stable ref to click-handler dependencies (files, setActiveFile, viewerRef).
-  // Kept up-to-date every render so the handler never closes over stale values.
+  // ── Axis selection ──────────────────────────────────────────────────────────
+  const [xAxis, setXAxisRaw] = useState('')
+  const [yAxis, setYAxisRaw] = useState('')
+
+  // ── Axis range limits ───────────────────────────────────────────────────────
+  const [xAuto, setXAuto] = useState(true)
+  const [yAuto, setYAuto] = useState(true)
+  const [xMin, setXMin] = useState('')
+  const [xMax, setXMax] = useState('')
+  const [yMin, setYMin] = useState('')
+  const [yMax, setYMax] = useState('')
+
+  // When auto is toggled OFF, pre-fill from the range Plotly is currently
+  // displaying (reads directly from the live figure layout so the numbers
+  // match exactly what's on screen).  Falls back to computing from the data
+  // if the figure hasn't been initialised yet.
+  const prefillFromPlotly = (axis: 'x' | 'y'): [string, string] => {
+    const layout = (plotRef.current as any)?._fullLayout
+    const range: unknown[] | undefined = layout?.[`${axis}axis`]?.range
+    if (Array.isArray(range) && range.length === 2) {
+      return [String(+(range[0] as number).toPrecision(5)), String(+(range[1] as number).toPrecision(5))]
+    }
+    // Fallback: derive from data
+    const col = axis === 'x' ? xAxis : yAxis
+    const [mn, mx] = dataExtent(rows, col)
+    return [String(mn), String(mx)]
+  }
+
+  const makeAutoHandler = (
+    axis: 'x' | 'y',
+    setAuto: (v: boolean) => void,
+    setMin: (v: string) => void,
+    setMax: (v: string) => void,
+  ) => (auto: boolean) => {
+    setAuto(auto)
+    if (!auto) {
+      const [mn, mx] = prefillFromPlotly(axis)
+      setMin(mn)
+      setMax(mx)
+    }
+  }
+  const handleXAuto = makeAutoHandler('x', setXAuto, setXMin, setXMax)
+  const handleYAuto = makeAutoHandler('y', setYAuto, setYMin, setYMax)
+
+  // Reset range to auto when axis column changes
+  const makeAxisSetter = (
+    setAxisRaw: (v: string) => void,
+    setAuto: (v: boolean) => void,
+    setMin: (v: string) => void,
+    setMax: (v: string) => void,
+  ) => (v: string) => { setAxisRaw(v); setAuto(true); setMin(''); setMax('') }
+  const setXAxis = makeAxisSetter(setXAxisRaw, setXAuto, setXMin, setXMax)
+  const setYAxis = makeAxisSetter(setYAxisRaw, setYAuto, setYMin, setYMax)
+
+  // Stable ref to click-handler dependencies
   const clickDepsRef = useRef({ files, setActiveFile, viewerRef })
   useEffect(() => { clickDepsRef.current = { files, setActiveFile, viewerRef } })
 
-  // Ref to the currently registered plotly_click handler so we can remove it
-  // before re-registering on the next Plotly.react() call.
+  // Stable ref to range state — kept current every render so the double-click
+  // handler always has the latest values without being recreated.
+  const rangeDepsRef = useRef({ xAuto, yAuto, xMin, xMax, yMin, yMax })
+  useEffect(() => { rangeDepsRef.current = { xAuto, yAuto, xMin, xMax, yMin, yMax } })
+
   const clickHandlerRef = useRef<((e: Plotly.PlotMouseEvent) => void) | null>(null)
+  const dblClickHandlerRef = useRef<(() => void) | null>(null)
 
   // Initialise axis defaults once when columns first arrive.
-  // Uses functional setState so we never overwrite a value the user has already
-  // chosen, and we DON'T include xAxis/yAxis in the dep array (avoids the
-  // strict-mode double-invoke setting both axes to the second column).
   useEffect(() => {
     if (allColumns.length === 0) return
-    setXAxis(prev => prev || allColumns[0])
-    setYAxis(prev => prev || (allColumns.length > 1 ? allColumns[1] : allColumns[0]))
+    setXAxisRaw(prev => prev || allColumns[0])
+    setYAxisRaw(prev => prev || (allColumns.length > 1 ? allColumns[1] : allColumns[0]))
   }, [allColumns])
 
   // Theme-aware Plotly colours
   const theme = useMemo(() => isDark
     ? {
         paper: 'transparent',
-        plot:  'rgba(255,255,255,0.04)',   // faint white tint — separates plot from panel bg
-        grid:  'rgba(160,185,230,0.20)',   // visible but subtle grid lines
-        line:  'rgba(160,185,230,0.35)',   // axis spine lines
-        tick:  '#8faac8',                  // solid mid-blue-gray tick labels
-        font:  '#b0c8e4',                  // axis title text
-        dot:   '#00e8c0',                  // brighter teal for better contrast
-        dim:   'rgba(100,130,180,0.25)',   // filtered-out dots
+        plot:  'rgba(255,255,255,0.04)',
+        grid:  'rgba(160,185,230,0.20)',
+        line:  'rgba(160,185,230,0.35)',
+        tick:  '#8faac8',
+        font:  '#b0c8e4',
+        dot:   '#00e8c0',
+        dim:   'rgba(100,130,180,0.25)',
         hover: 'rgba(18,24,52,0.96)',
         hoverTxt: '#c4d4ec',
         border: 'rgba(0,220,180,0.35)',
@@ -136,7 +280,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
       },
   [isDark])
 
-  // Memoize traces — only recomputed when data, axes, theme, or filter rules change
+  // Memoize traces — recomputed when data, axes, theme, filter rules, or range limits change
   const plotSpec = useMemo(() => {
     if (!xAxis || !yAxis || rows.length === 0) return null
 
@@ -183,7 +327,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
       hovertemplate: `<b>%{text}</b><br>${xAxis}: %{x:.3f}<br>${yAxis}: %{y:.3f}<extra></extra>`,
     })
 
-    // ── Filter cutoff lines (on-axis only, numeric rules only) ──────────────
+    // ── Filter cutoff lines ──────────────────────────────────────────────────
     const shapes: object[] = []
     const lineStyle = { color: 'rgba(248,113,113,0.65)', width: 1.5, dash: 'dash' }
     for (const rule of filterRules) {
@@ -206,19 +350,32 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
       }
     }
 
-    const axis = (titleText: string) => ({
-      title: { text: shortLabel(titleText), font: { size: 10, color: theme.font } },
-      tickfont: { size: 9, color: theme.tick },
-      gridcolor: theme.grid,
-      linecolor: theme.line,
-      zerolinecolor: theme.grid,
-      automargin: true,
-      autorange: true,
-    })
+    // ── Axis layout helper ──────────────────────────────────────────────────
+    const axisLayout = (
+      titleText: string,
+      isAuto: boolean,
+      rangeMin: string,
+      rangeMax: string,
+    ) => {
+      const mn = parseFloat(rangeMin)
+      const mx = parseFloat(rangeMax)
+      const manualRange = !isAuto && !isNaN(mn) && !isNaN(mx) ? [mn, mx] : null
+      return {
+        title: { text: shortLabel(titleText), font: { size: 10, color: theme.font } },
+        tickfont: { size: 9, color: theme.tick },
+        gridcolor: theme.grid,
+        linecolor: theme.line,
+        zerolinecolor: theme.grid,
+        automargin: true,
+        ...(manualRange
+          ? { range: manualRange, autorange: false }
+          : { autorange: true }),
+      }
+    }
 
     const layout: object = {
-      xaxis: axis(xAxis),
-      yaxis: axis(yAxis),
+      xaxis: axisLayout(xAxis, xAuto, xMin, xMax),
+      yaxis: axisLayout(yAxis, yAuto, yMin, yMax),
       shapes,
       margin: { t: 16, r: 16, b: 56, l: 60 },
       showlegend: false,
@@ -233,29 +390,21 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     }
 
     return { traces, layout }
-  }, [rows, xAxis, yAxis, filterText, filterRules, theme])
+  }, [rows, xAxis, yAxis, filterText, filterRules, theme, xAuto, yAuto, xMin, xMax, yMin, yMax])
 
-  // Always keep a ref to the latest plotSpec so the ResizeObserver can access it
-  // without being recreated every time the spec changes.
+  // Always keep a ref to the latest plotSpec
   const plotSpecRef = useRef(plotSpec)
   useEffect(() => { plotSpecRef.current = plotSpec }, [plotSpec])
 
-  // Tracks the spec that was last successfully rendered to a *visible* container.
-  // Only updated when Plotly.react() runs with non-zero dimensions, so the
-  // ResizeObserver can tell whether the current spec still needs a full re-draw.
   const lastRenderedSpecRef = useRef<typeof plotSpec>(null)
 
   const PLOT_CONFIG = { displayModeBar: false, responsive: true }
 
-  // ── Click-handler helper ─────────────────────────────────────────────────
-  // Called after every Plotly.react() — removes any previous handler then
-  // attaches a fresh one.  Using clickHandlerRef avoids stale closures and
-  // duplicate firings.
+  // ── Click-handler helper ──────────────────────────────────────────────────
   const attachClickHandler = (el: HTMLDivElement) => {
     const elAny = el as any
-    if (!elAny.on) return                        // Plotly not yet initialised
+    if (!elAny.on) return
 
-    // Remove the previous handler before re-adding
     if (clickHandlerRef.current) {
       try { elAny.removeListener('plotly_click', clickHandlerRef.current) } catch { /* ok */ }
     }
@@ -268,7 +417,6 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
 
       const { files: f, setActiveFile: saf, viewerRef: vr } = clickDepsRef.current
 
-      // Try exact path match, then stem match (in case customdata has no extension)
       const file =
         f.find(ff => ff.path === filePath) ??
         f.find(ff => {
@@ -285,38 +433,70 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     elAny.on('plotly_click', handler)
   }
 
-  // Render / update the plot — skips if the container is hidden (0×0) so that
-  // Plotly doesn't stamp .data on an invisible element and fool the ResizeObserver.
-  // The ResizeObserver handles the deferred full draw when the tab becomes visible.
+  // Double-click resets zoom — when in manual mode, re-apply the stored ranges
+  // instead of letting Plotly snap back to autorange.
+  const attachDblClickHandler = (el: HTMLDivElement) => {
+    const elAny = el as any
+    if (!elAny.on) return
+
+    if (dblClickHandlerRef.current) {
+      try { elAny.removeListener('plotly_doubleclick', dblClickHandlerRef.current) } catch { /* ok */ }
+    }
+
+    const handler = () => {
+      const { xAuto: xa, yAuto: ya, xMin: xn, xMax: xx, yMin: yn, yMax: yx } = rangeDepsRef.current
+      const xMn = parseFloat(xn), xMx = parseFloat(xx)
+      const yMn = parseFloat(yn), yMx = parseFloat(yx)
+      const hasX = !xa && !isNaN(xMn) && !isNaN(xMx)
+      const hasY = !ya && !isNaN(yMn) && !isNaN(yMx)
+      if (!hasX && !hasY) return   // both auto — let Plotly handle it normally
+
+      // Prevent Plotly's default double-click reset by immediately relayouting
+      // with the manual range(s) after a microtask (Plotly fires its reset async).
+      setTimeout(() => {
+        if (!plotRef.current) return
+        import('plotly.js').then(({ default: Plotly }) => {
+          if (!plotRef.current) return
+          const update: Record<string, unknown> = {}
+          if (hasX) { update['xaxis.range']     = [xMn, xMx]; update['xaxis.autorange'] = false }
+          if (hasY) { update['yaxis.range']     = [yMn, yMx]; update['yaxis.autorange'] = false }
+          Plotly.relayout(plotRef.current, update)
+        })
+      }, 0)
+    }
+
+    dblClickHandlerRef.current = handler
+    elAny.on('plotly_doubleclick', handler)
+  }
+
+  // Render / update the plot
   useEffect(() => {
     if (!plotRef.current || !plotSpec) return
     const el = plotRef.current
     const { width, height } = el.getBoundingClientRect()
-    if (width === 0 || height === 0) return          // tab hidden — defer to ResizeObserver
+    if (width === 0 || height === 0) return
     import('plotly.js').then(({ default: Plotly }) => {
       if (!plotRef.current) return
       Plotly.react(el, plotSpec.traces as Plotly.Data[], plotSpec.layout as Partial<Plotly.Layout>, PLOT_CONFIG)
       lastRenderedSpecRef.current = plotSpec
       attachClickHandler(el)
+      attachDblClickHandler(el)
     })
   }, [plotSpec]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ResizeObserver — fires when the container gains non-zero size (tab becomes visible).
-  // If the current plotSpec hasn't been rendered yet (was hidden when data arrived),
-  // do a full Plotly.react(); otherwise just resize the existing plot.
+  // ResizeObserver — deferred draw when tab becomes visible
   useEffect(() => {
     if (!plotRef.current) return
     const el = plotRef.current
     const ro = new ResizeObserver(() => {
       if (!plotRef.current) return
       const { width, height } = plotRef.current.getBoundingClientRect()
-      if (width === 0 || height === 0) return            // still hidden — skip
+      if (width === 0 || height === 0) return
 
       import('plotly.js').then(({ default: Plotly }) => {
         if (!plotRef.current) return
         const spec = plotSpecRef.current
         if (spec && spec !== lastRenderedSpecRef.current) {
-          // New data arrived while the tab was hidden — do a full re-draw now
           Plotly.react(
             plotRef.current,
             spec.traces as Plotly.Data[],
@@ -325,6 +505,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
           )
           lastRenderedSpecRef.current = spec
           attachClickHandler(plotRef.current)
+          attachDblClickHandler(plotRef.current)
         } else {
           Plotly.Plots.resize(plotRef.current)
         }
@@ -342,37 +523,71 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     }
   }, [])
 
-  // ── Render ───────────────────────────────────────────────────────────────────
-  // IMPORTANT: plotRef must ALWAYS be in the DOM from first mount so the
-  // [] ResizeObserver effect can attach to it. When there are no rows we
-  // overlay the empty-state on top instead of returning early.
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
 
-      {/* Axis selector bar – only visible when data is present */}
+      {/* Toolbar — only visible when data is present */}
       {rows.length > 0 && (
         <div style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '6px 10px',
+          flexDirection: 'column',
+          gap: 0,
           borderBottom: '1px solid var(--color-border)',
           background: 'var(--color-secondary-bg)',
           flexShrink: 0,
-          flexWrap: 'wrap',
         }}>
-          <AxisSelect value={xAxis} options={allColumns} onChange={setXAxis} label="X" />
-          <AxisSelect value={yAxis} options={allColumns} onChange={setYAxis} label="Y" />
-          <span style={{
-            marginLeft: 'auto',
-            fontSize: 10,
-            color: 'var(--color-text-disabled)',
-            fontFamily: 'JetBrains Mono, monospace',
-            whiteSpace: 'nowrap',
+          {/* Row 1: axis selectors + point count */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '6px 10px 4px',
+            flexWrap: 'wrap',
           }}>
-            {rows.length} pts · click to load
-          </span>
+            <AxisSelect value={xAxis} options={allColumns} onChange={setXAxis} label="X" />
+            <AxisSelect value={yAxis} options={allColumns} onChange={setYAxis} label="Y" />
+            <span style={{
+              marginLeft: 'auto',
+              fontSize: 10,
+              color: 'var(--color-text-disabled)',
+              fontFamily: 'JetBrains Mono, monospace',
+              whiteSpace: 'nowrap',
+            }}>
+              {rows.length} pts · click to load
+            </span>
+          </div>
+
+          {/* Row 2: axis range limits */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+            padding: '3px 10px 6px',
+            flexWrap: 'wrap',
+            borderTop: '1px solid var(--color-border)',
+          }}>
+            <RangeLimits
+              label="X range"
+              isAuto={xAuto}
+              onAutoChange={handleXAuto}
+              min={xMin}
+              max={xMax}
+              onMinChange={setXMin}
+              onMaxChange={setXMax}
+            />
+            <div style={{ width: 1, height: 14, background: 'var(--color-border)', flexShrink: 0 }} />
+            <RangeLimits
+              label="Y range"
+              isAuto={yAuto}
+              onAutoChange={handleYAuto}
+              min={yMin}
+              max={yMax}
+              onMinChange={setYMin}
+              onMaxChange={setYMax}
+            />
+          </div>
         </div>
       )}
 
@@ -382,7 +597,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
         style={{ flex: 1, minHeight: 0, cursor: rows.length > 0 ? 'crosshair' : 'default' }}
       />
 
-      {/* Empty-state overlay – shown when no data, lives above the plot div */}
+      {/* Empty-state overlay */}
       {rows.length === 0 && (
         <div style={{
           position: 'absolute',

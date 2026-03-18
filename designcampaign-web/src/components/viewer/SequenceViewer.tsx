@@ -140,11 +140,13 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
 
   // How many residues fit on one row.
   // contentWidth comes from contentRect.width on the scrollable div — already
-  // excludes padding and any vertical scrollbar, so only the chain pill needs
-  // to be subtracted.
+  // excludes padding and any vertical scrollbar, so only the chain pill and a
+  // safety margin need to be subtracted.
+  // Each group of CHUNK residues is followed by a CHUNK_GAP spacer, so the
+  // effective per-residue width is CELL_W + CHUNK_GAP/CHUNK.
   const residuesPerRow = useMemo(() => {
-    const usable = contentWidth - CHAIN_PILL_W
-    return Math.max(CHUNK, Math.floor(usable / CELL_W))
+    const usable = contentWidth - CHAIN_PILL_W - 32  // 32px aggressive safety margin
+    return Math.max(CHUNK, Math.floor(usable / (CELL_W + CHUNK_GAP / CHUNK)))
   }, [contentWidth])
 
   // Live drag preview

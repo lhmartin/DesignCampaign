@@ -10,6 +10,7 @@ import { readFileContent } from '@/lib/fsa'
 import { type ChainSequence, THREE_TO_ONE } from '@/lib/sequence'
 import { getFileFormat } from '@/lib/utils'
 import { syncToMolstar } from '@/lib/mol-selection-sync'
+import { extractCAPositions, applyStructureTransform } from '@/lib/mol-alignment'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -84,15 +85,13 @@ function CompareMenu({ plugin }: { plugin: PluginUIContext }) {
       const aPos = { x: posA.x.slice(0, len), y: posA.y.slice(0, len), z: posA.z.slice(0, len) }
       const bPos = { x: posB.x.slice(0, len), y: posB.y.slice(0, len), z: posB.z.slice(0, len) }
       const result = MinimizeRmsd.compute(aPos, bPos)
-      const { StateTransforms } = await import('molstar/lib/mol-plugin-state/transforms') as any
-      const update = plugin.state.data.build()
-        .to(structures[mobileIdx].cell.transform.ref)
-        .update(StateTransforms.Model.TransformStructureConformation, (p: any) => ({
-          ...p,
-          transform: { name: 'matrix', params: { data: Array.from(result.bTransform), transpose: false } },
-        }))
-      await plugin.runTask(plugin.state.data.updateTree(update))
-      updateEntry(id, { rmsd: result.rmsd as number })
+      const xformRef = await applyStructureTransform(
+        plugin,
+        structures[mobileIdx].cell.transform.ref,
+        Array.from(result.bTransform) as number[],
+        entry.dataRef,
+      )
+      updateEntry(id, { rmsd: result.rmsd as number, dataRef: xformRef })
     } catch { /* best effort */ }
     finally { setBusy(false) }
   }
@@ -535,26 +534,6 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
     )
   }
 )
-
-// ─── CA positions helper (shared by CompareMenu & sequence extraction) ────────
-
-function extractCAPositions(structure: any): { x: number[]; y: number[]; z: number[] } {
-  const x: number[] = [], y: number[] = [], z: number[] = []
-  try {
-    for (const unit of structure.units) {
-      if (unit.kind !== 0) continue
-      const { atoms } = unit.model.atomicHierarchy
-      const conf = unit.model.atomicConformation
-      for (let i = 0; i < unit.elements.length; i++) {
-        const idx = unit.elements[i]
-        if (atoms.auth_atom_id.value(idx) === 'CA') {
-          x.push(conf.x[idx]); y.push(conf.y[idx]); z.push(conf.z[idx])
-        }
-      }
-    }
-  } catch { /* gracefully return whatever we have */ }
-  return { x, y, z }
-}
 
 // ─── Sequence extraction from loaded Mol* plugin ──────────────────────────────
 

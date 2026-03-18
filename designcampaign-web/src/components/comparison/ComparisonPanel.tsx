@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import type { RefObject } from 'react'
 import type { MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
 import { useComparisonStore } from '@/stores/comparison-store'
+import { extractCAPositions, applyStructureTransform } from '@/lib/mol-alignment'
 
 interface ComparisonPanelProps {
   viewerRef: RefObject<MolstarViewerHandle | null>
@@ -45,20 +46,15 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
 
       const result = MinimizeRmsd.compute(aPos, bPos)
 
-      const { StateTransforms } = await import('molstar/lib/mol-plugin-state/transforms') as any
       const mobileCell = structures[mobileIdx].cell
-      const update = plugin.state.data.build()
-        .to(mobileCell.transform.ref)
-        .update(StateTransforms.Model.TransformStructureConformation, (p: any) => ({
-          ...p,
-          transform: {
-            name: 'matrix',
-            params: { data: Array.from(result.bTransform), transpose: false },
-          },
-        }))
-      await plugin.runTask(plugin.state.data.updateTree(update))
+      const xformRef = await applyStructureTransform(
+        plugin,
+        mobileCell.transform.ref,
+        Array.from(result.bTransform) as number[],
+        entry.dataRef,
+      )
 
-      updateEntry(id, { rmsd: result.rmsd as number })
+      updateEntry(id, { rmsd: result.rmsd as number, dataRef: xformRef })
       setStatus(null)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Alignment failed')
@@ -233,24 +229,3 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
   )
 }
 
-// ── CA atom coordinate extractor ─────────────────────────────────────────────
-
-function extractCAPositions(structure: any): { x: number[]; y: number[]; z: number[] } {
-  const x: number[] = [], y: number[] = [], z: number[] = []
-  try {
-    for (const unit of structure.units) {
-      if (unit.kind !== 0) continue
-      const { atoms } = unit.model.atomicHierarchy
-      const conf = unit.model.atomicConformation
-      for (let i = 0; i < unit.elements.length; i++) {
-        const atomIdx = unit.elements[i]
-        if (atoms.auth_atom_id.value(atomIdx) === 'CA') {
-          x.push(conf.x[atomIdx])
-          y.push(conf.y[atomIdx])
-          z.push(conf.z[atomIdx])
-        }
-      }
-    }
-  } catch { /* gracefully return whatever we have */ }
-  return { x, y, z }
-}
