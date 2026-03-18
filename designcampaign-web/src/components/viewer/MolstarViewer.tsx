@@ -84,7 +84,7 @@ function CompareMenu({ plugin }: { plugin: PluginUIContext }) {
       if (len === 0) return
       const aPos = { x: posA.x.slice(0, len), y: posA.y.slice(0, len), z: posA.z.slice(0, len) }
       const bPos = { x: posB.x.slice(0, len), y: posB.y.slice(0, len), z: posB.z.slice(0, len) }
-      const result = MinimizeRmsd.compute(aPos, bPos)
+      const result = MinimizeRmsd.compute({ a: aPos, b: bPos })
       const xformRef = await applyStructureTransform(
         plugin,
         structures[mobileIdx].cell.transform.ref,
