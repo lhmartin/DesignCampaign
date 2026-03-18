@@ -138,7 +138,7 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
 
   // How many residues fit on one row
   const residuesPerRow = useMemo(() => {
-    const usable = containerWidth - CONTROLS_W - CHAIN_PILL_W - 16  // 16 = left+right padding
+    const usable = containerWidth - CONTROLS_W - CHAIN_PILL_W - 24  // 24 = left(4) + right(20) padding
     return Math.max(CHUNK, Math.floor(usable / CELL_W))
   }, [containerWidth])
 

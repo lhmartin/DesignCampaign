@@ -63,11 +63,9 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
   const { currentFolder, files, activeFile, isScanning, openFolder, refreshFiles, setActiveFile } =
     useFileStore()
   const { setLoading } = useProteinStore()
-  const { groups, isGrouping, progress, startGrouping, clearGroups } = useGroupStore()
+  const { groups, isGrouping, progress, startGrouping, clearGroups, viewMode, setViewMode } = useGroupStore()
   const { autoLoadSidecars, clearAll: clearMetrics } = useMetricsStore()
   const hasSetupListeners = useRef(false)
-  // 'tree' = folder tree | 'groups' = sequence-identity groups
-  const [viewMode, setViewMode] = useState<'tree' | 'groups'>('tree')
   // Tracks which directory paths are expanded in tree view
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 

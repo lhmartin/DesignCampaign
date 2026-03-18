@@ -63,9 +63,11 @@ interface GroupStore {
   ungrouped: string[]
   isGrouping: boolean
   progress: number   // 0–1
+  viewMode: 'tree' | 'groups'
   startGrouping: (files: FileInfo[], readFile: (path: string) => Promise<string>) => Promise<void>
   clearGroups: () => void
   toggleGroup: (id: string) => void
+  setViewMode: (mode: 'tree' | 'groups') => void
 }
 
 function computeGroups(hashResults: Map<string, ChainHashResult>): {
@@ -121,6 +123,7 @@ export const useGroupStore = create<GroupStore>((set, get) => ({
   ungrouped: [],
   isGrouping: false,
   progress: 0,
+  viewMode: 'tree',
 
   clearGroups: () => set({ hashResults: new Map(), groups: [], ungrouped: [], progress: 0, isGrouping: false }),
 
@@ -128,6 +131,8 @@ export const useGroupStore = create<GroupStore>((set, get) => ({
     set(s => ({
       groups: s.groups.map(g => g.id === id ? { ...g, isExpanded: !g.isExpanded } : g),
     })),
+
+  setViewMode: (mode) => set({ viewMode: mode }),
 
   startGrouping: async (files, readFile) => {
     set({ isGrouping: true, progress: 0, hashResults: new Map(), groups: [], ungrouped: [] })

@@ -145,7 +145,7 @@ export function AppShell() {
                 <MetricsTable viewerRef={viewerRef} />
               </TabsContent>
 
-              <TabsContent value="plot">
+              <TabsContent value="plot" forceMount>
                 <ScatterPlot viewerRef={viewerRef} />
               </TabsContent>
 

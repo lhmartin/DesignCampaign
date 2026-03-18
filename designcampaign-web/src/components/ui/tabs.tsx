@@ -39,7 +39,8 @@ const TabsContent = ({
     className={cn(
       // When active, Radix removes [hidden] and we need this to stretch.
       // flex-1 + min-h-0 = fill remaining height without overflowing.
-      'flex-1 min-h-0 overflow-hidden focus-visible:outline-none',
+      // data-[state=inactive]:hidden hides force-mounted (but inactive) tabs.
+      'flex-1 min-h-0 overflow-hidden focus-visible:outline-none data-[state=inactive]:hidden',
       className
     )}
     {...props}

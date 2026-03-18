@@ -358,16 +358,30 @@ function RankingMetricRow({ rm, mode }: { rm: RankingMetric; mode: RankingMode }
             onChange={e => updateRankingMetric(rm.metric, { weight: parseFloat(e.target.value) })}
             style={{ width: 52, cursor: 'pointer', accentColor: 'var(--color-accent)', flexShrink: 0 }}
           />
-          <span style={{
-            fontSize: 10,
-            fontFamily: 'JetBrains Mono, monospace',
-            color: 'var(--color-text-secondary)',
-            width: 26,
-            textAlign: 'right',
-            flexShrink: 0,
-          }}>
-            {rm.weight.toFixed(2)}
-          </span>
+          <input
+            type="number"
+            min={0}
+            max={1}
+            step={0.05}
+            value={rm.weight.toFixed(2)}
+            disabled={!rm.active}
+            onChange={e => {
+              const v = Math.min(1, Math.max(0, parseFloat(e.target.value) || 0))
+              updateRankingMetric(rm.metric, { weight: v })
+            }}
+            style={{
+              width: 42,
+              fontSize: 10,
+              fontFamily: 'JetBrains Mono, monospace',
+              color: 'var(--color-text-secondary)',
+              background: 'transparent',
+              border: '1px solid var(--color-border)',
+              borderRadius: 3,
+              textAlign: 'right',
+              padding: '1px 3px',
+              flexShrink: 0,
+            }}
+          />
         </>
       )}
 
