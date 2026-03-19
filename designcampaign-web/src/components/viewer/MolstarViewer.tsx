@@ -51,32 +51,46 @@ function IconLayers({ size = 14 }: { size?: number }) {
 
 // ─── CDR label button (toolbar) ───────────────────────────────────────────────
 
+/** pct_id → colour + label for the confidence badge */
+function cdrConfidence(pctId: number): { color: string; label: string } {
+  if (pctId >= 0.7) return { color: 'rgba(34,197,94,0.85)',  label: `${Math.round(pctId * 100)}%` }
+  if (pctId >= 0.4) return { color: 'rgba(251,191,36,0.85)', label: `${Math.round(pctId * 100)}%` }
+  return                    { color: 'rgba(239,68,68,0.85)',  label: `${Math.round(pctId * 100)}%` }
+}
+
 function CdrButton({ chains, activeFile, onNeedSetup }: {
   chains: ChainSequence[]
   activeFile: string | null
   onNeedSetup?: () => void
 }) {
   const annotate      = useAntpackStore(s => s.annotate)
+  const annotateAll   = useAntpackStore(s => s.annotateAll)
   const cdrRunning    = useAntpackStore(s => !!activeFile && s.running.has(activeFile))
+  const anyRunning    = useAntpackStore(s => s.running.size > 0)
   const cdrError      = useAntpackStore(s => activeFile ? s.errors.get(activeFile) : undefined)
-  const hasAnnotation = useAntpackStore(s => !!activeFile && s.annotations.has(activeFile))
+  const annotation    = useAntpackStore(s => activeFile ? s.annotations.get(activeFile) : undefined)
   const [envReady, setEnvReady] = useState<boolean | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
 
-  const checkEnv = () => {
+  useEffect(() => {
     window.electronAPI?.pythonSetupStatus()
       .then(({ ready }) => setEnvReady(ready))
       .catch(() => setEnvReady(false))
-  }
-
-  useEffect(() => {
-    checkEnv()
     return window.electronAPI?.onPythonSetupComplete(() => setEnvReady(true))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (!activeFile || chains.length === 0) return null
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!menuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [menuOpen])
 
-  // Env status not yet known — don't render anything to avoid flicker
+  if (!activeFile || chains.length === 0) return null
   if (envReady === null) return null
 
   if (!envReady) {
@@ -85,19 +99,11 @@ function CdrButton({ chains, activeFile, onNeedSetup }: {
         onClick={onNeedSetup}
         title="Python environment not set up — click to install"
         style={{
-          alignSelf: 'center',
-          margin: '0 2px',
-          padding: '2px 8px',
-          borderRadius: 4,
-          fontSize: 9,
-          fontFamily: 'Outfit, sans-serif',
-          fontWeight: 600,
-          whiteSpace: 'nowrap',
-          flexShrink: 0,
-          cursor: 'pointer',
+          alignSelf: 'center', margin: '0 2px', padding: '2px 8px',
+          borderRadius: 4, fontSize: 9, fontFamily: 'Outfit, sans-serif',
+          fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0, cursor: 'pointer',
           border: '1px solid rgba(251,191,36,0.5)',
-          background: 'rgba(251,191,36,0.08)',
-          color: 'rgba(251,191,36,0.9)',
+          background: 'rgba(251,191,36,0.08)', color: 'rgba(251,191,36,0.9)',
         }}
       >
         ⚙ Set up Python
@@ -105,43 +111,119 @@ function CdrButton({ chains, activeFile, onNeedSetup }: {
     )
   }
 
+  // Compute best percent identity across chains for the confidence badge
+  const bestPctId = annotation
+    ? Math.max(...annotation.map(a => a.percentIdentity))
+    : null
+  const conf = bestPctId !== null ? cdrConfidence(bestPctId) : null
+
+  const btnBorder = cdrError
+    ? 'rgba(239,68,68,0.5)'
+    : annotation ? 'color-mix(in srgb, var(--color-accent) 40%, transparent)'
+    : 'var(--color-border)'
+  const btnBg = cdrError
+    ? 'rgba(239,68,68,0.10)'
+    : annotation ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)'
+    : 'transparent'
+  const btnFg = cdrError
+    ? 'rgba(239,68,68,0.9)'
+    : annotation ? 'var(--color-accent)' : 'var(--color-text-secondary)'
+
+  const sharedStyle: React.CSSProperties = {
+    alignSelf: 'center', padding: '2px 6px', fontSize: 9,
+    fontFamily: 'Outfit, sans-serif', fontWeight: 600,
+    whiteSpace: 'nowrap', flexShrink: 0,
+    cursor: (cdrRunning || anyRunning) ? 'wait' : 'pointer',
+    border: `1px solid ${btnBorder}`, background: btnBg, color: btnFg,
+  }
+
   return (
-    <button
-      onClick={() => void annotate(activeFile, chains)}
-      disabled={cdrRunning}
-      title={cdrError ?? (hasAnnotation
-        ? 'Re-run AntPack CDR annotation (IMGT)'
-        : 'Label CDR/FW regions using AntPack (IMGT scheme)')}
-      style={{
-        alignSelf: 'center',
-        margin: '0 2px',
-        padding: '2px 8px',
-        borderRadius: 4,
-        fontSize: 9,
-        fontFamily: 'Outfit, sans-serif',
-        fontWeight: 600,
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-        cursor: cdrRunning ? 'wait' : 'pointer',
-        border: `1px solid ${
-          cdrError      ? 'rgba(239,68,68,0.5)'
-          : hasAnnotation ? 'color-mix(in srgb, var(--color-accent) 40%, transparent)'
-          : 'var(--color-border)'
-        }`,
-        background: cdrError
-          ? 'rgba(239,68,68,0.10)'
-          : hasAnnotation
-            ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)'
-            : 'transparent',
-        color: cdrError
-          ? 'rgba(239,68,68,0.9)'
-          : hasAnnotation
-            ? 'var(--color-accent)'
-            : 'var(--color-text-secondary)',
-      }}
-    >
-      {cdrRunning ? 'Labelling…' : cdrError ? '⚠ CDR error' : 'Label CDR regions'}
-    </button>
+    <div ref={wrapRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', margin: '0 2px' }}>
+      {/* ── Main label button ── */}
+      <button
+        onClick={() => { void annotate(activeFile, chains); setMenuOpen(false) }}
+        disabled={cdrRunning || anyRunning}
+        title={cdrError ?? (annotation
+          ? `Re-run CDR annotation (best match ${conf ? conf.label : '—'})`
+          : 'Label CDR/FW regions using AntPack (IMGT)')}
+        style={{ ...sharedStyle, borderRadius: '4px 0 0 4px', borderRight: 'none' }}
+      >
+        {cdrRunning ? 'Labelling…'
+          : anyRunning ? 'Labelling all…'
+          : cdrError ? '⚠ CDR error'
+          : 'Label CDR regions'}
+      </button>
+
+      {/* Confidence badge (shown after annotation) */}
+      {conf && !cdrRunning && !anyRunning && (
+        <span style={{
+          alignSelf: 'center', padding: '2px 4px',
+          fontSize: 8, fontWeight: 700, fontFamily: 'Outfit, sans-serif',
+          background: btnBg, border: `1px solid ${btnBorder}`, borderLeft: 'none', borderRight: 'none',
+          color: conf.color, whiteSpace: 'nowrap',
+        }}
+          title={`Best AntPack sequence identity: ${conf.label}. ≥70% = good antibody/VHH match; <40% = low confidence.`}
+        >
+          {conf.label}
+        </span>
+      )}
+
+      {/* ── Dropdown arrow ── */}
+      <button
+        onClick={() => setMenuOpen(o => !o)}
+        disabled={anyRunning}
+        title="Annotation options"
+        style={{ ...sharedStyle, borderRadius: '0 4px 4px 0', padding: '2px 4px', borderLeft: 'none' }}
+      >
+        ▾
+      </button>
+
+      {/* ── Dropdown menu ── */}
+      {menuOpen && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, zIndex: 200,
+          marginTop: 2, minWidth: 160,
+          background: 'var(--color-secondary-bg)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 6,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+          overflow: 'hidden',
+        }}>
+          {([
+            {
+              label: 'This structure',
+              sublabel: 'Current file only',
+              onClick: () => { void annotate(activeFile, chains); setMenuOpen(false) },
+            },
+            {
+              label: 'All structures',
+              sublabel: 'Uses sequences from Calculate All',
+              onClick: () => { void annotateAll(); setMenuOpen(false) },
+            },
+          ] as const).map(item => (
+            <button
+              key={item.label}
+              onClick={item.onClick}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                width: '100%', padding: '7px 12px',
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                textAlign: 'left',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--color-accent) 10%, transparent)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+                {item.label}
+              </span>
+              <span style={{ fontSize: 9, color: 'var(--color-text-secondary)', marginTop: 1 }}>
+                {item.sublabel}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

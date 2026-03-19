@@ -1,4 +1,4 @@
-import require$$1$3, { ipcMain, app, dialog, BrowserWindow, Menu } from "electron";
+import require$$1$3, { app, ipcMain, dialog, BrowserWindow, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import path$m from "node:path";
 import require$$1 from "fs";
@@ -14354,6 +14354,66 @@ NsisUpdater$1.NsisUpdater = NsisUpdater;
     }
   });
 })(main$1);
+function resourceRoot() {
+  return app.isPackaged ? process.resourcesPath : app.getAppPath();
+}
+function getUvPath() {
+  const bin = process.platform === "win32" ? "uv.exe" : "uv";
+  const bundled = path$m.join(resourceRoot(), "uv-dist", bin);
+  if (fs$j.existsSync(bundled)) return bundled;
+  return bin;
+}
+function getSidecarScriptPath() {
+  return path$m.join(resourceRoot(), "python", "sidecar.py");
+}
+function getPythonProjectDir() {
+  return path$m.join(app.getPath("userData"), "python-env");
+}
+function getPythonExe() {
+  const venv = path$m.join(getPythonProjectDir(), ".venv");
+  return process.platform === "win32" ? path$m.join(venv, "Scripts", "python.exe") : path$m.join(venv, "bin", "python3");
+}
+function isEnvReady() {
+  return fs$j.existsSync(getPythonExe());
+}
+async function runSetup(onProgress) {
+  const uvPath = getUvPath();
+  if (!fs$j.existsSync(uvPath) && uvPath !== "uv" && uvPath !== "uv.exe") {
+    throw new Error(
+      `uv binary not found at ${uvPath}. Please reinstall the application.`
+    );
+  }
+  const projectDir = getPythonProjectDir();
+  fs$j.mkdirSync(projectDir, { recursive: true });
+  const pyprojectSrc = path$m.join(resourceRoot(), "python", "pyproject.toml");
+  const pyprojectDst = path$m.join(projectDir, "pyproject.toml");
+  fs$j.copyFileSync(pyprojectSrc, pyprojectDst);
+  onProgress("Creating Python 3.11 environment with uv…");
+  await new Promise((resolve, reject) => {
+    const proc = spawn(
+      uvPath,
+      ["sync", "--directory", projectDir, "--python", "3.11", "--no-dev"],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, UV_PYTHON_DOWNLOADS: "automatic" }
+      }
+    );
+    const onLine = (line) => {
+      if (line.trim()) onProgress(line.trim());
+    };
+    createInterface({ input: proc.stdout }).on("line", onLine);
+    createInterface({ input: proc.stderr }).on("line", onLine);
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`uv exited with code ${code}`));
+    });
+    proc.on(
+      "error",
+      (err) => reject(new Error(`Failed to launch uv: ${err.message}`))
+    );
+  });
+  onProgress("Python environment ready.");
+}
 function registerIpcHandlers(getMainWindow) {
   ipcMain.handle("dialog:openFolder", async () => {
     const win2 = getMainWindow();
@@ -14446,14 +14506,25 @@ function registerIpcHandlers(getMainWindow) {
       watcherMap.delete(resolved);
     }
   });
+  ipcMain.handle("python:setup-status", () => ({ ready: isEnvReady() }));
+  ipcMain.handle("python:run-setup", async () => {
+    const win2 = getMainWindow();
+    try {
+      await runSetup((msg) => win2 == null ? void 0 : win2.webContents.send("python:setup-progress", msg));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 }
 let sidecarProcess = null;
 const sidecarPending = /* @__PURE__ */ new Map();
 function getSidecar() {
   if (sidecarProcess && sidecarProcess.exitCode === null) return sidecarProcess;
-  const pyCmd = process.platform === "win32" ? "python" : "python3";
-  const scriptPath = path$m.join(app.getAppPath(), "python", "sidecar.py");
-  sidecarProcess = spawn(pyCmd, [scriptPath], { stdio: ["pipe", "pipe", "inherit"] });
+  if (!isEnvReady()) {
+    throw new Error("Python environment is not set up. Open the app and complete the Python setup first.");
+  }
+  sidecarProcess = spawn(getPythonExe(), [getSidecarScriptPath()], { stdio: ["pipe", "pipe", "inherit"] });
   const rl = createInterface({ input: sidecarProcess.stdout });
   rl.on("line", (line) => {
     try {
@@ -14573,7 +14644,13 @@ app.on("activate", () => {
     createWindow();
   }
 });
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  if (!isEnvReady()) {
+    runSetup((msg) => win == null ? void 0 : win.webContents.send("python:setup-progress", msg)).then(() => win == null ? void 0 : win.webContents.send("python:setup-complete")).catch(() => {
+    });
+  }
+});
 if (!VITE_DEV_SERVER_URL) {
   main$1.autoUpdater.checkForUpdates();
   main$1.autoUpdater.on("update-available", () => {

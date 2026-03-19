@@ -44,5 +44,16 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
     electron.ipcRenderer.send("update:install");
   },
   // Python sidecar
-  pythonCall: (action, args) => electron.ipcRenderer.invoke("python:call", action, args)
+  pythonCall: (action, args) => electron.ipcRenderer.invoke("python:call", action, args),
+  pythonSetupStatus: () => electron.ipcRenderer.invoke("python:setup-status"),
+  runPythonSetup: () => electron.ipcRenderer.invoke("python:run-setup"),
+  onPythonSetupProgress: (cb) => {
+    const listener = (_, message) => cb(message);
+    electron.ipcRenderer.on("python:setup-progress", listener);
+    return () => electron.ipcRenderer.off("python:setup-progress", listener);
+  },
+  onPythonSetupComplete: (cb) => {
+    electron.ipcRenderer.on("python:setup-complete", cb);
+    return () => electron.ipcRenderer.off("python:setup-complete", cb);
+  }
 });

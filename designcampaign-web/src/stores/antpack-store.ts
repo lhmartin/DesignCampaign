@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { pythonCall } from '@/lib/python-bridge'
 import { useMetricsStore } from '@/stores/metrics-store'
+import { useSequenceStore } from '@/stores/sequence-store'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,15 @@ interface SidecarChainResult {
   error: string | null
 }
 
+export type CdrConfidenceFilter = 'all' | 'medium' | 'high'
+
+/** Minimum percent identity thresholds for each filter level. */
+export const CDR_CONFIDENCE_THRESHOLDS: Record<CdrConfidenceFilter, number> = {
+  all:    0,
+  medium: 0.4,
+  high:   0.7,
+}
+
 interface AntPackStore {
   /** Map from structure file path → per-chain annotations */
   annotations: Map<string, ChainCdrAnnotation[]>
@@ -38,6 +48,12 @@ interface AntPackStore {
   running: Set<string>
   /** Map from file path → error message */
   errors: Map<string, string>
+  /**
+   * Only render CDR annotation tracks for chains whose AntPack percent identity
+   * meets this threshold. 'all' = no filter; 'medium' = ≥40%; 'high' = ≥70%.
+   */
+  cdrConfidenceFilter: CdrConfidenceFilter
+  setCdrConfidenceFilter: (filter: CdrConfidenceFilter) => void
 
   /**
    * Annotate the chains of a structure.
@@ -49,15 +65,24 @@ interface AntPackStore {
     scheme?: string,
   ): Promise<void>
 
+  /**
+   * Annotate every loaded structure in one batched sidecar call.
+   * Sequences are sourced from sequenceStore (populated by calculateAll).
+   * Returns the number of structures submitted.
+   */
+  annotateAll(scheme?: string): Promise<number>
+
   clearAnnotations(filePath: string): void
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 export const useAntpackStore = create<AntPackStore>((set, get) => ({
-  annotations: new Map(),
-  running:     new Set(),
-  errors:      new Map(),
+  annotations:          new Map(),
+  running:              new Set(),
+  errors:               new Map(),
+  cdrConfidenceFilter:  'all',
+  setCdrConfidenceFilter: (filter) => set({ cdrConfidenceFilter: filter }),
 
   async annotate(filePath, chains, scheme = 'imgt') {
     if (get().running.has(filePath)) return
@@ -119,6 +144,87 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
         }
       })
     }
+  },
+
+  async annotateAll(scheme = 'imgt') {
+    const rows      = useMetricsStore.getState().rows
+    const sequences = useSequenceStore.getState().sequences
+
+    // Build a flat batch: one entry per chain across all structures.
+    // Track which entry belongs to which filePath so we can split results back out.
+    type BatchEntry = { filePath: string; rowName: string; chain: string; sequence: string }
+    const batch: BatchEntry[] = []
+
+    for (const row of rows) {
+      if (!row.filePath) continue
+      const chainSeqs = sequences.get(row.name)
+      if (!chainSeqs?.length) continue
+      for (const cs of chainSeqs) {
+        batch.push({ filePath: row.filePath, rowName: row.name, chain: cs.chain, sequence: cs.seq })
+      }
+    }
+    if (batch.length === 0) return 0
+
+    const filePaths = [...new Set(batch.map(b => b.filePath))]
+
+    set(s => ({
+      running: new Set([...s.running, ...filePaths]),
+      errors:  new Map([...s.errors].filter(([k]) => !filePaths.includes(k))),
+    }))
+
+    try {
+      const results = await pythonCall<SidecarChainResult[]>('antpack_number', {
+        sequences: batch.map(b => ({ name: b.rowName, chain: b.chain, sequence: b.sequence })),
+        scheme,
+      })
+
+      // Group chain annotations back by filePath (results are in the same order as batch).
+      const annotationsByPath = new Map<string, ChainCdrAnnotation[]>()
+      for (let i = 0; i < results.length; i++) {
+        const r  = results[i]
+        const fp = batch[i].filePath
+        if (!annotationsByPath.has(fp)) annotationsByPath.set(fp, [])
+        annotationsByPath.get(fp)!.push({
+          chain:           r.chain,
+          chainType:       r.chain_type ?? 'H',
+          scheme:          r.scheme,
+          percentIdentity: r.percent_identity,
+          assignments:     r.assignments,
+        })
+      }
+
+      // Inject CDR length metrics for every structure.
+      const injectBatch = [...annotationsByPath.entries()].map(([fp, anns]) => {
+        const cdrMetrics: Record<string, number> = {}
+        for (const ann of anns) {
+          const prefix = ann.chainType === 'H' ? 'h' : 'l'
+          for (const n of [1, 2, 3] as const) {
+            const region = `CDR${n}` as CdrRegionName
+            cdrMetrics[`cdr_${prefix}${n}_len`] = ann.assignments.filter(a => a === region).length
+          }
+        }
+        const rowName = rows.find(r => r.filePath === fp)?.name ?? fp
+        return { filePath: fp, name: rowName, metrics: cdrMetrics }
+      })
+      useMetricsStore.getState().batchInjectResults(injectBatch)
+
+      set(s => {
+        const next    = new Map(s.annotations)
+        const running = new Set(s.running)
+        for (const [fp, anns] of annotationsByPath) next.set(fp, anns)
+        for (const fp of filePaths) running.delete(fp)
+        return { annotations: next, running }
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set(s => {
+        const running = new Set(s.running)
+        for (const fp of filePaths) running.delete(fp)
+        return { running, errors: new Map([...s.errors, ...filePaths.map(fp => [fp, msg] as [string, string])]) }
+      })
+    }
+
+    return filePaths.length
   },
 
   clearAnnotations(filePath) {

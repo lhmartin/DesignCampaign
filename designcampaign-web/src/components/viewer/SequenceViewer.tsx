@@ -4,8 +4,8 @@ import { residueColor, HYDROPHOBICITY_SCALE } from '@/lib/sequence'
 import { lerpColor } from '@/lib/constants/colors'
 import { useSelectionStore } from '@/stores/selection-store'
 import { syncToMolstar } from '@/lib/mol-selection-sync'
-import { useAntpackStore } from '@/stores/antpack-store'
-import type { CdrRegionName } from '@/stores/antpack-store'
+import { useAntpackStore, CDR_CONFIDENCE_THRESHOLDS } from '@/stores/antpack-store'
+import type { CdrRegionName, CdrConfidenceFilter } from '@/stores/antpack-store'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -218,7 +218,9 @@ interface SequenceViewerProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 export function SequenceViewer({ chains, plugin, residueValues, structurePath }: SequenceViewerProps) {
   const { selectedResidues, addResidue, clearSelection, selectAll } = useSelectionStore()
-  const cdrAnnotations = useAntpackStore(s => structurePath ? s.annotations.get(structurePath) : undefined)
+  const cdrAnnotations      = useAntpackStore(s => structurePath ? s.annotations.get(structurePath) : undefined)
+  const cdrConfidenceFilter = useAntpackStore(s => s.cdrConfidenceFilter)
+  const setCdrConfidenceFilter = useAntpackStore(s => s.setCdrConfidenceFilter)
 
   const [colorMode, setColorMode]       = useState<ColorMode>('chemical')
   const [hoveredKey, setHoveredKey]     = useState<string | null>(null)
@@ -265,15 +267,17 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
     })
   , [chains, residuesPerRow])
 
-  // Pre-build span lists per chain — recomputes only when annotations change
+  // Pre-build span lists per chain — filtered by confidence threshold
   const spansByChain = useMemo(() => {
     if (!cdrAnnotations) return null
+    const minPct = CDR_CONFIDENCE_THRESHOLDS[cdrConfidenceFilter]
     const map = new Map<string, CdrSpan[]>()
     for (const ann of cdrAnnotations) {
+      if (ann.percentIdentity < minPct) continue
       map.set(ann.chain, buildCdrSpans(ann.assignments))
     }
-    return map
-  }, [cdrAnnotations])
+    return map.size > 0 ? map : null
+  }, [cdrAnnotations, cdrConfidenceFilter])
 
   // Expand viewer height to accommodate annotation tracks when present
   const maxStripH = useMemo(() => {
@@ -395,6 +399,42 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
 
         {/* Legend */}
         <ColorLegend mode={colorMode} />
+
+        {/* CDR confidence filter — only shown when annotations are present */}
+        {cdrAnnotations && cdrAnnotations.length > 0 && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 8.5, color: 'var(--color-text-disabled)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              CDR conf.
+            </span>
+            <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+              {(['all', 'medium', 'high'] as CdrConfidenceFilter[]).map((opt, i) => (
+                <button
+                  key={opt}
+                  onClick={() => setCdrConfidenceFilter(opt)}
+                  style={{
+                    flex: 1,
+                    fontSize: 8,
+                    fontFamily: 'Outfit, sans-serif',
+                    fontWeight: 600,
+                    padding: '2px 0',
+                    border: 'none',
+                    borderLeft: i > 0 ? '1px solid var(--color-border)' : 'none',
+                    cursor: 'pointer',
+                    background: cdrConfidenceFilter === opt
+                      ? 'var(--color-accent)'
+                      : 'var(--color-background)',
+                    color: cdrConfidenceFilter === opt
+                      ? '#0a0e1a'
+                      : 'var(--color-text-secondary)',
+                    transition: 'background 100ms ease, color 100ms ease',
+                  }}
+                >
+                  {opt === 'all' ? 'All' : opt === 'medium' ? 'Med' : 'High'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Wrapped sequence rows (scrolls vertically) ── */}
