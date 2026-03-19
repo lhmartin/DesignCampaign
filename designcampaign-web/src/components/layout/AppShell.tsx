@@ -6,6 +6,7 @@ import { MolstarViewer, type MolstarViewerHandle } from '@/components/viewer/Mol
 import { MetricsTable } from '@/components/metrics/MetricsTable'
 import { ScatterPlot } from '@/components/metrics/ScatterPlot'
 import { CorrelationHeatmap } from '@/components/metrics/CorrelationHeatmap'
+import { AlignmentViewer } from '@/components/metrics/AlignmentViewer'
 import { SelectionPanel } from '@/components/selection/SelectionPanel'
 import { FilterPanel } from '@/components/filter/FilterPanel'
 import { useFileStore } from '@/stores/file-store'
@@ -141,6 +142,7 @@ export function AppShell() {
                 <TabsTrigger value="metrics">Metrics</TabsTrigger>
                 <TabsTrigger value="plot">Plot</TabsTrigger>
                 <TabsTrigger value="corr">Corr</TabsTrigger>
+                <TabsTrigger value="alignment">Align</TabsTrigger>
                 <TabsTrigger value="filter">Filter</TabsTrigger>
                 <TabsTrigger value="selection">Selection</TabsTrigger>
               </TabsList>
@@ -159,6 +161,10 @@ export function AppShell() {
 
               <TabsContent value="corr" forceMount>
                 <CorrelationHeatmap />
+              </TabsContent>
+
+              <TabsContent value="alignment">
+                <AlignmentViewer viewerRef={viewerRef} />
               </TabsContent>
 
               <TabsContent value="filter">

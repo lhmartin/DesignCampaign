@@ -64,4 +64,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installUpdate: (): void => {
     ipcRenderer.send('update:install')
   },
+
+  // Python sidecar
+  pythonCall: (action: string, args: unknown): Promise<unknown> =>
+    ipcRenderer.invoke('python:call', action, args),
 })

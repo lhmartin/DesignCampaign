@@ -1,6 +1,8 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { createInterface } from 'node:readline'
 
 export interface FileInfo {
   name: string
@@ -126,6 +128,67 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     }
   })
 }
+
+// ── Python sidecar ────────────────────────────────────────────────────────────
+
+let sidecarProcess: ChildProcess | null = null
+const sidecarPending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
+
+function getSidecar(): ChildProcess {
+  if (sidecarProcess && sidecarProcess.exitCode === null) return sidecarProcess
+
+  const pyCmd      = process.platform === 'win32' ? 'python' : 'python3'
+  const scriptPath = path.join(app.getAppPath(), 'python', 'sidecar.py')
+
+  sidecarProcess = spawn(pyCmd, [scriptPath], { stdio: ['pipe', 'pipe', 'inherit'] })
+
+  const rl = createInterface({ input: sidecarProcess.stdout! })
+  rl.on('line', (line: string) => {
+    try {
+      const msg = JSON.parse(line) as { id: string; result: unknown; error: string | null }
+      const p   = sidecarPending.get(msg.id)
+      if (!p) return
+      sidecarPending.delete(msg.id)
+      if (msg.error) p.reject(new Error(msg.error))
+      else p.resolve(msg.result)
+    } catch { /* ignore malformed lines */ }
+  })
+
+  sidecarProcess.on('exit', () => {
+    sidecarProcess = null
+    // Reject all pending calls if the sidecar dies unexpectedly
+    for (const [id, p] of sidecarPending) {
+      p.reject(new Error('Python sidecar exited unexpectedly'))
+      sidecarPending.delete(id)
+    }
+  })
+
+  return sidecarProcess
+}
+
+ipcMain.handle('python:call', async (_evt, action: string, args: unknown) => {
+  const id   = crypto.randomUUID()
+  const proc = getSidecar()
+  proc.stdin!.write(JSON.stringify({ id, action, args }) + '\n')
+  return new Promise((resolve, reject) => {
+    sidecarPending.set(id, { resolve, reject })
+    setTimeout(() => {
+      if (sidecarPending.has(id)) {
+        sidecarPending.delete(id)
+        reject(new Error('Python sidecar timeout (30 s)'))
+      }
+    }, 30_000)
+  })
+})
+
+export function cleanupSidecar(): void {
+  if (sidecarProcess) {
+    sidecarProcess.kill()
+    sidecarProcess = null
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const watcherMap = new Map<string, fs.FSWatcher>()
 

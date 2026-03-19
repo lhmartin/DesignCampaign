@@ -4,6 +4,7 @@ import { residueColor, HYDROPHOBICITY_SCALE } from '@/lib/sequence'
 import { lerpColor } from '@/lib/constants/colors'
 import { useSelectionStore } from '@/stores/selection-store'
 import { syncToMolstar } from '@/lib/mol-selection-sync'
+import { useAntpackStore, type CdrRegionName } from '@/stores/antpack-store'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -21,7 +22,20 @@ const CHAIN_PILL_W = 36   // px width reserved for chain label
 const MAX_STRIP_H  = MAX_ROWS * ROW_H + (MAX_ROWS - 1) * ROW_GAP + 12  // ≈ 185 px (recomputes with ROW_GAP)
 
 // ─── Color mode ───────────────────────────────────────────────────────────────
-type ColorMode = 'none' | 'chemical' | 'hydrophobicity' | 'plddt'
+type ColorMode = 'none' | 'chemical' | 'hydrophobicity' | 'plddt' | 'cdr'
+
+// ─── CDR colors ───────────────────────────────────────────────────────────────
+const CDR_COLORS: Record<CdrRegionName, { bg: string; fg: string }> = {
+  CDR1: { bg: 'rgba(239,68,68,0.45)',    fg: '#ffffff' },
+  CDR2: { bg: 'rgba(249,115,22,0.45)',   fg: '#ffffff' },
+  CDR3: { bg: 'rgba(234,179,8,0.45)',    fg: '#0a0e1a' },
+  FW1:  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' },
+  FW2:  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' },
+  FW3:  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' },
+  FW4:  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' },
+}
+const CDR_NO_ANNOTATION: { bg: string; fg: string } =
+  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' }
 
 // ─── Color legend ─────────────────────────────────────────────────────────────
 function Swatch({ bg, label }: { bg: string; label: string }) {
@@ -53,6 +67,15 @@ function ColorLegend({ mode }: { mode: ColorMode }) {
         <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Philic</span>
         <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Phobic</span>
       </div>
+    </div>
+  )
+
+  if (mode === 'cdr') return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
+      <Swatch bg="rgba(239,68,68,0.65)"  label="CDR1" />
+      <Swatch bg="rgba(249,115,22,0.65)" label="CDR2" />
+      <Swatch bg="rgba(234,179,8,0.65)"  label="CDR3" />
+      <Swatch bg="rgba(120,120,140,0.20)" label="FW" />
     </div>
   )
 
@@ -110,21 +133,22 @@ interface SequenceViewerProps {
   chains: ChainSequence[]
   plugin: PluginUIContext | null
   residueValues?: Map<string, number>
+  /** File path of the currently loaded structure — used to key CDR annotations. */
+  structurePath?: string
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
-export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewerProps) {
+export function SequenceViewer({ chains, plugin, residueValues, structurePath }: SequenceViewerProps) {
   const { selectedResidues, addResidue, clearSelection, selectAll } = useSelectionStore()
+  const { annotate, getAnnotations, isRunning, getError }           = useAntpackStore()
 
-  const [colorMode, setColorMode] = useState<ColorMode>('chemical')
-  const [hoveredKey, setHoveredKey]   = useState<string | null>(null)
-  const [anchor, setAnchor]           = useState<Pos | null>(null)
-  const [dragEnd, setDragEnd]         = useState<Pos | null>(null)
-  const mouseDownRef                  = useRef(false)
-  const containerRef                  = useRef<HTMLDivElement>(null)
-  const contentRef                    = useRef<HTMLDivElement>(null)
-  // contentRect.width from the scrollable content div already excludes padding
-  // and the vertical scrollbar — no manual offsets needed.
+  const [colorMode, setColorMode]       = useState<ColorMode>('chemical')
+  const [hoveredKey, setHoveredKey]     = useState<string | null>(null)
+  const [anchor, setAnchor]             = useState<Pos | null>(null)
+  const [dragEnd, setDragEnd]           = useState<Pos | null>(null)
+  const mouseDownRef                    = useRef(false)
+  const containerRef                    = useRef<HTMLDivElement>(null)
+  const contentRef                      = useRef<HTMLDivElement>(null)
   const [contentWidth, setContentWidth] = useState(600)
 
   useEffect(() => {
@@ -171,16 +195,40 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
     })
   , [chains, residuesPerRow])
 
+  // CDR annotations for the current structure, indexed by chain id
+  const cdrByChain = useMemo(() => {
+    if (!structurePath) return null
+    const annots = getAnnotations(structurePath)
+    if (!annots) return null
+    const map = new Map<string, (CdrRegionName | null)[]>()
+    for (const a of annots) map.set(a.chain, a.assignments)
+    return map
+  }, [structurePath, getAnnotations])
+
+  const cdrRunning  = structurePath ? isRunning(structurePath)  : false
+  const cdrError    = structurePath ? getError(structurePath)    : undefined
+
   if (chains.length === 0) return null
+
+  // ── CDR annotate handler ────────────────────────────────────────────────────
+  function handleAnnotateCdr() {
+    if (!structurePath) return
+    void annotate(structurePath, chains)
+    setColorMode('cdr')
+  }
 
   // ── Cell color by mode ──────────────────────────────────────────────────────
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const cellColors = useCallback((code: string, key: string): { bg: string; fg: string } => {
-    if (colorMode === 'none')          return { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' }
+  const cellColors = useCallback((code: string, key: string, chainId: string, resIdx: number): { bg: string; fg: string } => {
+    if (colorMode === 'none')           return { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' }
     if (colorMode === 'hydrophobicity') return hydroColor(code)
     if (colorMode === 'plddt')          return plddtColor(residueValues?.get(key))
+    if (colorMode === 'cdr') {
+      const assignment = cdrByChain?.get(chainId)?.[resIdx] ?? null
+      return assignment ? CDR_COLORS[assignment] : CDR_NO_ANNOTATION
+    }
     return residueColor(code)
-  }, [colorMode, residueValues])
+  }, [colorMode, residueValues, cdrByChain])
 
   // ── Event handlers ──────────────────────────────────────────────────────────
   function handleCellMouseDown(
@@ -281,7 +329,38 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
           <option value="chemical">Chem</option>
           <option value="hydrophobicity">Hydro</option>
           <option value="plddt">pLDDT</option>
+          <option value="cdr">CDR</option>
         </select>
+
+        {/* CDR annotate button — shown when CDR mode is selected */}
+        {colorMode === 'cdr' && structurePath && (
+          <button
+            onClick={handleAnnotateCdr}
+            disabled={cdrRunning}
+            title={cdrError ?? 'Run AntPack CDR annotation'}
+            style={{
+              marginTop: 5,
+              fontSize: 9,
+              fontFamily: 'Outfit, sans-serif',
+              fontWeight: 600,
+              padding: '3px 4px',
+              borderRadius: 4,
+              border: `1px solid ${cdrError ? 'rgba(239,68,68,0.5)' : 'var(--color-border)'}`,
+              background: cdrError ? 'rgba(239,68,68,0.10)' : 'transparent',
+              color: cdrError
+                ? 'rgba(239,68,68,0.9)'
+                : cdrByChain
+                  ? 'var(--color-accent)'
+                  : 'var(--color-text-secondary)',
+              cursor: cdrRunning ? 'wait' : 'pointer',
+              width: '100%',
+              flexShrink: 0,
+              textAlign: 'center',
+            }}
+          >
+            {cdrRunning ? '…' : cdrError ? '⚠ Retry' : cdrByChain ? '✓ Done' : 'Annotate'}
+          </button>
+        )}
 
         {/* Legend */}
         <ColorLegend mode={colorMode} />
@@ -411,7 +490,7 @@ export function SequenceViewer({ chains, plugin, residueValues }: SequenceViewer
                     const isHovered   = hoveredKey === key
                     const isChunkEnd  = (globalIdx + 1) % CHUNK === 0 && i < row.residues.length - 1
 
-                    const { bg: modeBg, fg: modeFg } = cellColors(res.code, key)
+                    const { bg: modeBg, fg: modeFg } = cellColors(res.code, key, row.chain.chain, resIdx)
                     const dimBg  = `color-mix(in srgb, ${modeBg} 65%, transparent)`
                     const cellBg = isActive
                       ? 'var(--color-accent)'

@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { FileInfo } from '@/types/electron'
 import { extractMetricsFromPDB } from '@/lib/parsers/pdb-metrics'
+import { parseChainSequences } from '@/lib/parsers/pdb-sequence'
+import { useSequenceStore } from '@/stores/sequence-store'
 import { getFileStem } from '@/lib/utils'
 
 export interface ProteinMetrics {
@@ -223,11 +225,16 @@ export const useMetricsStore = create<MetricsStore>()(
       try {
         const content = await readFile(files[i].path)
         const m = extractMetricsFromPDB(content)
+        const name = getFileStem(files[i].name)
         results.push({
-          name: getFileStem(files[i].name),
+          name,
           filePath: files[i].path,
           metrics: m as unknown as Record<string, number>,
         })
+        // Also extract sequences for the Alignment viewer
+        const chainData = parseChainSequences(content)
+        const chains = Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence }))
+        useSequenceStore.getState().setSequences(name, chains)
       } catch { /* skip unreadable files */ }
 
       // Push incremental update and yield to event loop every file

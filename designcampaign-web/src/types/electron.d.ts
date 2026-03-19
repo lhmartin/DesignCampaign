@@ -33,6 +33,9 @@ export interface ElectronAPI {
   onUpdateAvailable(callback: () => void): () => void
   onUpdateDownloaded(callback: () => void): () => void
   installUpdate(): void
+
+  // Python sidecar
+  pythonCall(action: string, args: unknown): Promise<unknown>
 }
 
 declare global {
