@@ -33,6 +33,7 @@ export interface MolstarViewerHandle {
 interface MolstarViewerProps {
   onStructureLoaded?: (filePath: string) => void
   onError?: (error: string) => void
+  onNeedPythonSetup?: () => void
 }
 
 // ─── Comparison overlay icon ──────────────────────────────────────────────────
@@ -50,13 +51,59 @@ function IconLayers({ size = 14 }: { size?: number }) {
 
 // ─── CDR label button (toolbar) ───────────────────────────────────────────────
 
-function CdrButton({ chains, activeFile }: { chains: ChainSequence[]; activeFile: string | null }) {
+function CdrButton({ chains, activeFile, onNeedSetup }: {
+  chains: ChainSequence[]
+  activeFile: string | null
+  onNeedSetup?: () => void
+}) {
   const annotate      = useAntpackStore(s => s.annotate)
   const cdrRunning    = useAntpackStore(s => !!activeFile && s.running.has(activeFile))
   const cdrError      = useAntpackStore(s => activeFile ? s.errors.get(activeFile) : undefined)
   const hasAnnotation = useAntpackStore(s => !!activeFile && s.annotations.has(activeFile))
+  const [envReady, setEnvReady] = useState<boolean | null>(null)
+
+  const checkEnv = () => {
+    window.electronAPI?.pythonSetupStatus()
+      .then(({ ready }) => setEnvReady(ready))
+      .catch(() => setEnvReady(false))
+  }
+
+  useEffect(() => {
+    checkEnv()
+    return window.electronAPI?.onPythonSetupComplete(() => setEnvReady(true))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (!activeFile || chains.length === 0) return null
+
+  // Env status not yet known — don't render anything to avoid flicker
+  if (envReady === null) return null
+
+  if (!envReady) {
+    return (
+      <button
+        onClick={onNeedSetup}
+        title="Python environment not set up — click to install"
+        style={{
+          alignSelf: 'center',
+          margin: '0 2px',
+          padding: '2px 8px',
+          borderRadius: 4,
+          fontSize: 9,
+          fontFamily: 'Outfit, sans-serif',
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
+          cursor: 'pointer',
+          border: '1px solid rgba(251,191,36,0.5)',
+          background: 'rgba(251,191,36,0.08)',
+          color: 'rgba(251,191,36,0.9)',
+        }}
+      >
+        ⚙ Set up Python
+      </button>
+    )
+  }
 
   return (
     <button
@@ -374,7 +421,7 @@ function CompareMenu({ plugin }: { plugin: PluginUIContext }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>(
-  function MolstarViewer({ onStructureLoaded, onError }, ref) {
+  function MolstarViewer({ onStructureLoaded, onError, onNeedPythonSetup }, ref) {
     const containerRef = useRef<HTMLDivElement>(null)
     const { plugin, isLoading, error, setIsLoading } = useMolstar(containerRef)
     const [style, setStyle] = useState<RepresentationStyle>('cartoon')
@@ -532,7 +579,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
                 onResetView={() => { try { (plugin as any).managers.camera.reset() } catch { /* best effort */ } }}
               />
             </div>
-            <CdrButton chains={seqData.seq} activeFile={activeFile} />
+            <CdrButton chains={seqData.seq} activeFile={activeFile} onNeedSetup={onNeedPythonSetup} />
             <InterfaceMenu plugin={plugin} />
             <CompareMenu plugin={plugin} />
           </div>

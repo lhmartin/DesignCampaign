@@ -39,6 +39,7 @@ export interface ElectronAPI {
   pythonSetupStatus(): Promise<{ ready: boolean }>
   runPythonSetup(): Promise<{ ok: boolean; error?: string }>
   onPythonSetupProgress(callback: (message: string) => void): () => void
+  onPythonSetupComplete(callback: () => void): () => void
 }
 
 declare global {

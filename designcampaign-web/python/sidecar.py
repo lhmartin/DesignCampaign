@@ -35,12 +35,13 @@ def _imgt_region(num_str: str) -> str | None:
 # AntPack loads model weights on construction; caching avoids reloading per sequence.
 _annotator_cache: dict = {}
 
-def _get_annotator(chain_type: str, scheme: str):
-    key = (chain_type, scheme)
-    if key not in _annotator_cache:
+def _get_annotator(scheme: str):
+    """Return a single annotator that scores all chain types (H, K, L)."""
+    if scheme not in _annotator_cache:
         from antpack import SingleChainAnnotator  # type: ignore  # noqa: PLC0415
-        _annotator_cache[key] = SingleChainAnnotator(allowed_chain=chain_type, scheme=scheme)
-    return _annotator_cache[key]
+        # chains=['H','K','L'] lets AntPack pick the best-matching chain type.
+        _annotator_cache[scheme] = SingleChainAnnotator(chains=['H', 'K', 'L'], scheme=scheme)
+    return _annotator_cache[scheme]
 
 
 def _antpack_number(args: dict) -> list:
@@ -49,51 +50,38 @@ def _antpack_number(args: dict) -> list:
       "sequences": [{"name": str, "chain": str, "sequence": str}],
       "scheme": "imgt" | "chothia" | "aho"   (default "imgt")
     }
-    Returns list of {name, chain, scheme, percent_identity, assignments, error}.
-    assignments = per-residue CDR/FW label (same length as input sequence).
+    Returns list of {name, chain, chain_type, scheme, percent_identity, assignments, error}.
+
+    In AntPack 0.3.x, analyze_seq() returns:
+      (numbering, percent_identity, chain_type, error_msg)
+    where `numbering` is already 1:1 with the input sequence (no gap positions).
     """
     scheme = args.get('scheme', 'imgt')
     results = []
 
+    ann = _get_annotator(scheme)
+
     for s in args['sequences']:
-        seq       = s['sequence']
-        name      = s['name']
-        chain_id  = s.get('chain', 'A')
+        seq      = s['sequence']
+        name     = s['name']
+        chain_id = s.get('chain', 'A')
 
-        # Try all chain types and keep the best hit.
-        best: dict | None = None
-        for chain_type in ('H', 'L', 'K'):
-            try:
-                ann = _get_annotator(chain_type, scheme)
-                numbering, pct_id, aligned_seq, err = ann.analyze_seq(seq)
-                if best is None or float(pct_id) > best['pct']:
-                    # Build per-residue assignments (skip gap '-' positions)
-                    assignments = [
-                        _imgt_region(pos)
-                        for pos, aa in zip(numbering, aligned_seq)
-                        if aa != '-'
-                    ]
-                    best = {
-                        'pct': float(pct_id),
-                        'assignments': assignments,
-                        'error': err,
-                        'chain_type': chain_type,
-                    }
-            except Exception:
-                pass
-
-        if best is None:
+        try:
+            numbering, pct_id, chain_type, err = ann.analyze_seq(seq)
+            # numbering is 1:1 with input residues — map directly to FW/CDR names.
+            assignments = [_imgt_region(pos) for pos in numbering]
             results.append({
                 'name': name, 'chain': chain_id, 'scheme': scheme,
-                'percent_identity': 0.0, 'assignments': [], 'error': 'Annotation failed',
+                'chain_type': chain_type,
+                'percent_identity': float(pct_id),
+                'assignments': assignments,
+                'error': err or None,
             })
-        else:
+        except Exception:
             results.append({
                 'name': name, 'chain': chain_id, 'scheme': scheme,
-                'chain_type': best['chain_type'],
-                'percent_identity': best['pct'],
-                'assignments': best['assignments'],
-                'error': best['error'],
+                'chain_type': 'H',
+                'percent_identity': 0.0, 'assignments': [], 'error': 'Annotation failed',
             })
 
     return results

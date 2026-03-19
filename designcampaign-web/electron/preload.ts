@@ -80,4 +80,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('python:setup-progress', listener)
     return () => ipcRenderer.off('python:setup-progress', listener)
   },
+
+  onPythonSetupComplete: (cb: () => void): (() => void) => {
+    ipcRenderer.on('python:setup-complete', cb)
+    return () => ipcRenderer.off('python:setup-complete', cb)
+  },
 })

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { autoUpdater } from 'electron-updater'
 import { registerIpcHandlers, cleanupWatchers } from './ipc-handlers'
+import { isEnvReady, runSetup } from './python-setup'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -97,7 +98,16 @@ app.on('activate', () => {
   }
 })
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  createWindow()
+  // Silently set up the Python environment on first launch so CDR annotation
+  // is ready without the user needing to interact with the setup modal.
+  if (!isEnvReady()) {
+    runSetup(msg => win?.webContents.send('python:setup-progress', msg))
+      .then(() => win?.webContents.send('python:setup-complete'))
+      .catch(() => { /* surface via modal if user explicitly requests setup */ })
+  }
+})
 
 // ── Auto-update ───────────────────────────────────────────────────────────────
 // Only runs in production (VITE_DEV_SERVER_URL is set during `npm run dev`).

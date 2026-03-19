@@ -195,6 +195,7 @@ export function AppShell() {
               ref={viewerRef}
               onStructureLoaded={(path) => { console.log('Loaded:', path) }}
               onError={(err) => { console.error('Viewer error:', err) }}
+              onNeedPythonSetup={() => setShowPythonSetup(true)}
             />
           </div>
         </ResizablePanel>
