@@ -25,6 +25,11 @@
     "!node_modules"
   ],
 
+  "extraResources": [
+    { "from": "uv-dist/",  "to": "uv-dist"  },
+    { "from": "python/",   "to": "python"   },
+  ],
+
   // Icon: resources/icon.ico (win), resources/icon.icns (mac), resources/icon.png (linux 512x512)
   // Generate with: npx electron-icon-builder --input=resources/icon-src.png --output=resources
   "icon": "resources/icon",

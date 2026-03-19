@@ -1,8 +1,9 @@
-import { ipcMain, dialog, BrowserWindow, app } from 'electron'
+import { ipcMain, dialog, BrowserWindow } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { isEnvReady, getPythonExe, getSidecarScriptPath, runSetup } from './python-setup'
 
 export interface FileInfo {
   name: string
@@ -127,6 +128,18 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       watcherMap.delete(resolved)
     }
   })
+
+  ipcMain.handle('python:setup-status', () => ({ ready: isEnvReady() }))
+
+  ipcMain.handle('python:run-setup', async () => {
+    const win = getMainWindow()
+    try {
+      await runSetup(msg => win?.webContents.send('python:setup-progress', msg))
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
 }
 
 // ── Python sidecar ────────────────────────────────────────────────────────────
@@ -137,10 +150,11 @@ const sidecarPending = new Map<string, { resolve: (v: unknown) => void; reject: 
 function getSidecar(): ChildProcess {
   if (sidecarProcess && sidecarProcess.exitCode === null) return sidecarProcess
 
-  const pyCmd      = process.platform === 'win32' ? 'python' : 'python3'
-  const scriptPath = path.join(app.getAppPath(), 'python', 'sidecar.py')
+  if (!isEnvReady()) {
+    throw new Error('Python environment is not set up. Open the app and complete the Python setup first.')
+  }
 
-  sidecarProcess = spawn(pyCmd, [scriptPath], { stdio: ['pipe', 'pipe', 'inherit'] })
+  sidecarProcess = spawn(getPythonExe(), [getSidecarScriptPath()], { stdio: ['pipe', 'pipe', 'inherit'] })
 
   const rl = createInterface({ input: sidecarProcess.stdout! })
   rl.on('line', (line: string) => {

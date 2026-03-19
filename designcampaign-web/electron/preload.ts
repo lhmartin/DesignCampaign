@@ -68,4 +68,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Python sidecar
   pythonCall: (action: string, args: unknown): Promise<unknown> =>
     ipcRenderer.invoke('python:call', action, args),
+
+  pythonSetupStatus: (): Promise<{ ready: boolean }> =>
+    ipcRenderer.invoke('python:setup-status'),
+
+  runPythonSetup: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('python:run-setup'),
+
+  onPythonSetupProgress: (cb: (message: string) => void): (() => void) => {
+    const listener = (_: Electron.IpcRendererEvent, message: string) => cb(message)
+    ipcRenderer.on('python:setup-progress', listener)
+    return () => ipcRenderer.off('python:setup-progress', listener)
+  },
 })

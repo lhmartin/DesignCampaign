@@ -36,6 +36,9 @@ export interface ElectronAPI {
 
   // Python sidecar
   pythonCall(action: string, args: unknown): Promise<unknown>
+  pythonSetupStatus(): Promise<{ ready: boolean }>
+  runPythonSetup(): Promise<{ ok: boolean; error?: string }>
+  onPythonSetupProgress(callback: (message: string) => void): () => void
 }
 
 declare global {

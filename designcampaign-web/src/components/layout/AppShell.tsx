@@ -11,6 +11,7 @@ import { SelectionPanel } from '@/components/selection/SelectionPanel'
 import { FilterPanel } from '@/components/filter/FilterPanel'
 import { useFileStore } from '@/stores/file-store'
 import { UpdateBanner } from './UpdateBanner'
+import { PythonSetupModal } from './PythonSetupModal'
 
 // Shared card style — applied to each panel's inner wrapper
 const cardStyle: React.CSSProperties = {
@@ -30,6 +31,7 @@ export function AppShell() {
   const viewerRef = useRef<MolstarViewerHandle>(null)
   const { activeFile, currentFolder, setFolder } = useFileStore()
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
+  const [showPythonSetup, setShowPythonSetup] = useState(false)
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
@@ -41,6 +43,12 @@ export function AppShell() {
     if (currentFolder) setFolder(currentFolder)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // intentionally runs once on mount
+
+  useEffect(() => {
+    window.electronAPI?.pythonSetupStatus()
+      .then(({ ready }) => { if (!ready) setShowPythonSetup(true) })
+      .catch(() => {})
+  }, [])
 
   return (
     <div style={{
@@ -192,6 +200,13 @@ export function AppShell() {
         </ResizablePanel>
 
       </ResizablePanelGroup>
+
+      {showPythonSetup && (
+        <PythonSetupModal
+          onComplete={() => setShowPythonSetup(false)}
+          onDismiss={() => setShowPythonSetup(false)}
+        />
+      )}
     </div>
   )
 }
