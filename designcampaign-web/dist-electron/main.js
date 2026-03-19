@@ -1,4 +1,4 @@
-import require$$1$3, { ipcMain, dialog, app, BrowserWindow, Menu } from "electron";
+import require$$1$3, { ipcMain, app, dialog, BrowserWindow, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import path$m from "node:path";
 import require$$1 from "fs";
@@ -16,6 +16,8 @@ import require$$2$1 from "url";
 import require$$14 from "zlib";
 import require$$4$1 from "http";
 import fs$j from "node:fs";
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 var commonjsGlobal = typeof globalThis !== "undefined" ? globalThis : typeof window !== "undefined" ? window : typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : {};
 var main$1 = {};
 var fs$i = {};
@@ -14445,6 +14447,48 @@ function registerIpcHandlers(getMainWindow) {
     }
   });
 }
+let sidecarProcess = null;
+const sidecarPending = /* @__PURE__ */ new Map();
+function getSidecar() {
+  if (sidecarProcess && sidecarProcess.exitCode === null) return sidecarProcess;
+  const pyCmd = process.platform === "win32" ? "python" : "python3";
+  const scriptPath = path$m.join(app.getAppPath(), "python", "sidecar.py");
+  sidecarProcess = spawn(pyCmd, [scriptPath], { stdio: ["pipe", "pipe", "inherit"] });
+  const rl = createInterface({ input: sidecarProcess.stdout });
+  rl.on("line", (line) => {
+    try {
+      const msg = JSON.parse(line);
+      const p = sidecarPending.get(msg.id);
+      if (!p) return;
+      sidecarPending.delete(msg.id);
+      if (msg.error) p.reject(new Error(msg.error));
+      else p.resolve(msg.result);
+    } catch {
+    }
+  });
+  sidecarProcess.on("exit", () => {
+    sidecarProcess = null;
+    for (const [id, p] of sidecarPending) {
+      p.reject(new Error("Python sidecar exited unexpectedly"));
+      sidecarPending.delete(id);
+    }
+  });
+  return sidecarProcess;
+}
+ipcMain.handle("python:call", async (_evt, action, args) => {
+  const id = crypto.randomUUID();
+  const proc = getSidecar();
+  proc.stdin.write(JSON.stringify({ id, action, args }) + "\n");
+  return new Promise((resolve, reject) => {
+    sidecarPending.set(id, { resolve, reject });
+    setTimeout(() => {
+      if (sidecarPending.has(id)) {
+        sidecarPending.delete(id);
+        reject(new Error("Python sidecar timeout (30 s)"));
+      }
+    }, 3e4);
+  });
+});
 const watcherMap = /* @__PURE__ */ new Map();
 function cleanupWatchers() {
   for (const watcher of watcherMap.values()) {

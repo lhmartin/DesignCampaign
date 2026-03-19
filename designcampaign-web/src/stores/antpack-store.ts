@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { pythonCall } from '@/lib/python-bridge'
+import { useMetricsStore } from '@/stores/metrics-store'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,8 @@ export type CdrRegionName = 'CDR1' | 'CDR2' | 'CDR3' | 'FW1' | 'FW2' | 'FW3' | '
  */
 export interface ChainCdrAnnotation {
   chain: string
+  /** AntPack-identified chain type: 'H' (heavy), 'L' or 'K' (light) */
+  chainType: 'H' | 'L' | 'K'
   scheme: string
   percentIdentity: number
   /** Array aligned to chain residues: CdrRegionName or null for unassigned. */
@@ -21,6 +24,7 @@ export interface ChainCdrAnnotation {
 interface SidecarChainResult {
   name: string
   chain: string
+  chain_type: 'H' | 'L' | 'K'
   scheme: string
   percent_identity: number
   assignments: (CdrRegionName | null)[]
@@ -77,10 +81,25 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
 
       const chainAnnotations: ChainCdrAnnotation[] = results.map(r => ({
         chain:           r.chain,
+        chainType:       r.chain_type ?? 'H',
         scheme:          r.scheme,
         percentIdentity: r.percent_identity,
         assignments:     r.assignments,
       }))
+
+      // Inject CDR length columns into the metrics table.
+      // Heavy chains → cdr_h1_len / cdr_h2_len / cdr_h3_len
+      // Light chains  → cdr_l1_len / cdr_l2_len / cdr_l3_len
+      const cdrMetrics: Record<string, number> = {}
+      for (const ann of chainAnnotations) {
+        const prefix = ann.chainType === 'H' ? 'h' : 'l'
+        for (const n of [1, 2, 3] as const) {
+          const region = `CDR${n}` as const
+          cdrMetrics[`cdr_${prefix}${n}_len`] = ann.assignments.filter(a => a === region).length
+        }
+      }
+      const rowName = useMetricsStore.getState().rows.find(r => r.filePath === filePath)?.name ?? filePath
+      useMetricsStore.getState().batchInjectResults([{ filePath, name: rowName, metrics: cdrMetrics }])
 
       set(s => {
         const next = new Map(s.annotations)

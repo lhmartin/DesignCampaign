@@ -42,5 +42,7 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   },
   installUpdate: () => {
     electron.ipcRenderer.send("update:install");
-  }
+  },
+  // Python sidecar
+  pythonCall: (action, args) => electron.ipcRenderer.invoke("python:call", action, args)
 });

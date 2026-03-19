@@ -12,6 +12,7 @@ type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIConte
 const CELL_W       = 10   // px per residue cell
 const NUM_H        = 11   // px for residue-number annotation row
 const AA_H         = 17   // px for amino-acid cell row
+const ANNOT_H      = 13   // px for CDR/FW region annotation track
 const ROW_H        = NUM_H + AA_H   // 28 px per wrapped row
 const CHUNK        = 8    // residues per chunk
 const CHUNK_GAP    = 2    // px gap between chunks
@@ -19,23 +20,108 @@ const ROW_GAP      = 1    // px gap between wrapped rows
 const MAX_ROWS     = 6    // max visible rows before vertical scroll
 const CONTROLS_W   = 90   // px width of left colour-mode controls
 const CHAIN_PILL_W = 36   // px width reserved for chain label
-const MAX_STRIP_H  = MAX_ROWS * ROW_H + (MAX_ROWS - 1) * ROW_GAP + 12  // ≈ 185 px (recomputes with ROW_GAP)
 
 // ─── Color mode ───────────────────────────────────────────────────────────────
-type ColorMode = 'none' | 'chemical' | 'hydrophobicity' | 'plddt' | 'cdr'
+type ColorMode = 'none' | 'chemical' | 'hydrophobicity' | 'plddt'
 
-// ─── CDR colors ───────────────────────────────────────────────────────────────
-const CDR_COLORS: Record<CdrRegionName, { bg: string; fg: string }> = {
-  CDR1: { bg: 'rgba(239,68,68,0.45)',    fg: '#ffffff' },
-  CDR2: { bg: 'rgba(249,115,22,0.45)',   fg: '#ffffff' },
-  CDR3: { bg: 'rgba(234,179,8,0.45)',    fg: '#0a0e1a' },
-  FW1:  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' },
-  FW2:  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' },
-  FW3:  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' },
-  FW4:  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' },
+// ─── CDR annotation track colors ──────────────────────────────────────────────
+const REGION_COLORS: Record<CdrRegionName, { bg: string; fg: string }> = {
+  CDR1: { bg: 'rgba(239,68,68,0.65)',   fg: '#ffffff' },
+  CDR2: { bg: 'rgba(249,115,22,0.65)',  fg: '#ffffff' },
+  CDR3: { bg: 'rgba(234,179,8,0.65)',   fg: '#0a0e1a' },
+  FW1:  { bg: 'rgba(100,120,160,0.18)', fg: 'var(--color-text-disabled)' },
+  FW2:  { bg: 'rgba(100,120,160,0.18)', fg: 'var(--color-text-disabled)' },
+  FW3:  { bg: 'rgba(100,120,160,0.18)', fg: 'var(--color-text-disabled)' },
+  FW4:  { bg: 'rgba(100,120,160,0.18)', fg: 'var(--color-text-disabled)' },
 }
-const CDR_NO_ANNOTATION: { bg: string; fg: string } =
-  { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' }
+
+// ─── CDR span helpers ─────────────────────────────────────────────────────────
+
+interface CdrSpan {
+  region: CdrRegionName
+  startIdx: number  // inclusive, 0-indexed into chain residues
+  endIdx:   number  // inclusive
+}
+
+/** Group consecutive same-region assignments into contiguous spans. */
+function buildCdrSpans(assignments: (CdrRegionName | null)[]): CdrSpan[] {
+  const spans: CdrSpan[] = []
+  let cur: CdrSpan | null = null
+  for (let i = 0; i < assignments.length; i++) {
+    const r = assignments[i]
+    if (r === null) {
+      if (cur) { spans.push(cur); cur = null }
+    } else if (cur && cur.region === r) {
+      cur.endIdx = i
+    } else {
+      if (cur) spans.push(cur)
+      cur = { region: r, startIdx: i, endIdx: i }
+    }
+  }
+  if (cur) spans.push(cur)
+  return spans
+}
+
+/** Left-edge pixel of residue i within a display row, accounting for chunk gaps. */
+function resX(i: number): number {
+  return i * CELL_W + Math.floor(i / CHUNK) * CHUNK_GAP
+}
+
+// ─── Annotation track component ───────────────────────────────────────────────
+
+const AnnotationTrack = React.memo(function AnnotationTrack({
+  rowStartIdx, rowLength, spans,
+}: {
+  rowStartIdx: number
+  rowLength:   number
+  spans:       CdrSpan[]
+}) {
+  const rowEndIdx = rowStartIdx + rowLength - 1
+  const trackW    = resX(rowLength - 1) + CELL_W
+
+  const visible = spans
+    .filter(s => s.endIdx >= rowStartIdx && s.startIdx <= rowEndIdx)
+    .map(s => ({
+      region: s.region,
+      lo: Math.max(s.startIdx, rowStartIdx) - rowStartIdx,
+      hi: Math.min(s.endIdx,   rowEndIdx)   - rowStartIdx,
+    }))
+
+  return (
+    <div style={{ position: 'relative', height: ANNOT_H, width: trackW, flexShrink: 0 }}>
+      {visible.map(({ region, lo, hi }, i) => {
+        const x = resX(lo)
+        const w = resX(hi) + CELL_W - x
+        const { bg, fg } = REGION_COLORS[region]
+        return (
+          <div key={i} style={{
+            position: 'absolute',
+            left: x, top: 2,
+            width: w, height: ANNOT_H - 4,
+            background: bg,
+            borderRadius: 3,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+          }}>
+            {w >= 22 && (
+              <span style={{
+                fontSize: 7, fontWeight: 700,
+                color: fg,
+                letterSpacing: '0.04em',
+                whiteSpace: 'nowrap',
+                pointerEvents: 'none',
+              }}>
+                {region}
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+})
 
 // ─── Color legend ─────────────────────────────────────────────────────────────
 function Swatch({ bg, label }: { bg: string; label: string }) {
@@ -67,15 +153,6 @@ function ColorLegend({ mode }: { mode: ColorMode }) {
         <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Philic</span>
         <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Phobic</span>
       </div>
-    </div>
-  )
-
-  if (mode === 'cdr') return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
-      <Swatch bg="rgba(239,68,68,0.65)"  label="CDR1" />
-      <Swatch bg="rgba(249,115,22,0.65)" label="CDR2" />
-      <Swatch bg="rgba(234,179,8,0.65)"  label="CDR3" />
-      <Swatch bg="rgba(120,120,140,0.20)" label="FW" />
     </div>
   )
 
@@ -140,8 +217,7 @@ interface SequenceViewerProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 export function SequenceViewer({ chains, plugin, residueValues, structurePath }: SequenceViewerProps) {
   const { selectedResidues, addResidue, clearSelection, selectAll } = useSelectionStore()
-  const annotate      = useAntpackStore(s => s.annotate)
-  // Subscribe directly to the relevant slices so the component re-renders when annotations arrive
+  const annotate       = useAntpackStore(s => s.annotate)
   const cdrAnnotations = useAntpackStore(s => structurePath ? s.annotations.get(structurePath) : undefined)
   const cdrRunning     = useAntpackStore(s => !!structurePath && s.running.has(structurePath))
   const cdrError       = useAntpackStore(s => structurePath ? s.errors.get(structurePath) : undefined)
@@ -166,24 +242,16 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
     return () => ro.disconnect()
   }, [])
 
-  // How many residues fit on one row.
-  // contentWidth comes from contentRect.width on the scrollable div — already
-  // excludes padding and any vertical scrollbar, so only the chain pill and a
-  // safety margin need to be subtracted.
-  // Each group of CHUNK residues is followed by a CHUNK_GAP spacer, so the
-  // effective per-residue width is CELL_W + CHUNK_GAP/CHUNK.
   const residuesPerRow = useMemo(() => {
-    const usable = contentWidth - CHAIN_PILL_W - 32  // 32px aggressive safety margin
+    const usable = contentWidth - CHAIN_PILL_W - 32
     return Math.max(CHUNK, Math.floor(usable / (CELL_W + CHUNK_GAP / CHUNK)))
   }, [contentWidth])
 
-  // Live drag preview
   const dragKeys = useMemo<Set<string>>(() => {
     if (!anchor || !dragEnd) return new Set()
     return new Set(keysInRange(chains, anchor, dragEnd))
   }, [chains, anchor, dragEnd])
 
-  // Pre-build wrapped display rows — only recomputes when chains or layout changes, not on hover
   const displayRows = useMemo(() =>
     chains.flatMap((chain, ci) => {
       const totalRows = Math.ceil(chain.residues.length / residuesPerRow)
@@ -199,13 +267,21 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
     })
   , [chains, residuesPerRow])
 
-  // CDR annotations indexed by chain id — recomputes whenever the store slice changes
-  const cdrByChain = useMemo(() => {
+  // Pre-build span lists per chain — recomputes only when annotations change
+  const spansByChain = useMemo(() => {
     if (!cdrAnnotations) return null
-    const map = new Map<string, (CdrRegionName | null)[]>()
-    for (const a of cdrAnnotations) map.set(a.chain, a.assignments)
+    const map = new Map<string, CdrSpan[]>()
+    for (const ann of cdrAnnotations) {
+      map.set(ann.chain, buildCdrSpans(ann.assignments))
+    }
     return map
   }, [cdrAnnotations])
+
+  // Expand viewer height to accommodate annotation tracks when present
+  const maxStripH = useMemo(() => {
+    const extraH = spansByChain ? ANNOT_H : 0
+    return MAX_ROWS * (ROW_H + extraH) + (MAX_ROWS - 1) * ROW_GAP + 12
+  }, [spansByChain])
 
   if (chains.length === 0) return null
 
@@ -213,20 +289,15 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
   function handleAnnotateCdr() {
     if (!structurePath) return
     void annotate(structurePath, chains)
-    setColorMode('cdr')
   }
 
   // ── Cell color by mode ──────────────────────────────────────────────────────
-  const cellColors = useCallback((code: string, key: string, chainId: string, resIdx: number): { bg: string; fg: string } => {
+  const cellColors = useCallback((code: string, key: string, _chainId: string, _resIdx: number): { bg: string; fg: string } => {
     if (colorMode === 'none')           return { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' }
     if (colorMode === 'hydrophobicity') return hydroColor(code)
     if (colorMode === 'plddt')          return plddtColor(residueValues?.get(key))
-    if (colorMode === 'cdr') {
-      const assignment = cdrByChain?.get(chainId)?.[resIdx] ?? null
-      return assignment ? CDR_COLORS[assignment] : CDR_NO_ANNOTATION
-    }
     return residueColor(code)
-  }, [colorMode, residueValues, cdrByChain])
+  }, [colorMode, residueValues])
 
   // ── Event handlers ──────────────────────────────────────────────────────────
   function handleCellMouseDown(
@@ -285,7 +356,7 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
       style={{
         display: 'flex',
         flexShrink: 0,
-        maxHeight: MAX_STRIP_H,
+        maxHeight: maxStripH,
         overflow: 'hidden',
         background: 'var(--color-secondary-bg)',
         borderBottom: '1px solid var(--color-border)',
@@ -305,7 +376,8 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
         alignItems: 'stretch',
         overflowY: 'auto',
       }}>
-        {/* Dropdown */}
+
+        {/* Colour mode dropdown */}
         <select
           value={colorMode}
           onChange={e => setColorMode(e.target.value as ColorMode)}
@@ -327,15 +399,14 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
           <option value="chemical">Chem</option>
           <option value="hydrophobicity">Hydro</option>
           <option value="plddt">pLDDT</option>
-          <option value="cdr">CDR</option>
         </select>
 
-        {/* CDR annotate button — shown when CDR mode is selected */}
-        {colorMode === 'cdr' && structurePath && (
+        {/* CDR annotation button — always visible when a structure is loaded */}
+        {structurePath && (
           <button
             onClick={handleAnnotateCdr}
             disabled={cdrRunning}
-            title={cdrError ?? 'Run AntPack CDR annotation'}
+            title={cdrError ?? (spansByChain ? 'Re-run AntPack CDR annotation' : 'Run AntPack CDR annotation (IMGT scheme)')}
             style={{
               marginTop: 5,
               fontSize: 9,
@@ -343,11 +414,19 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
               fontWeight: 600,
               padding: '3px 4px',
               borderRadius: 4,
-              border: `1px solid ${cdrError ? 'rgba(239,68,68,0.5)' : 'var(--color-border)'}`,
-              background: cdrError ? 'rgba(239,68,68,0.10)' : 'transparent',
+              border: `1px solid ${
+                cdrError    ? 'rgba(239,68,68,0.5)'
+                : spansByChain ? 'color-mix(in srgb, var(--color-accent) 40%, transparent)'
+                : 'var(--color-border)'
+              }`,
+              background: cdrError
+                ? 'rgba(239,68,68,0.10)'
+                : spansByChain
+                  ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)'
+                  : 'transparent',
               color: cdrError
                 ? 'rgba(239,68,68,0.9)'
-                : cdrByChain
+                : spansByChain
                   ? 'var(--color-accent)'
                   : 'var(--color-text-secondary)',
               cursor: cdrRunning ? 'wait' : 'pointer',
@@ -356,7 +435,7 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
               textAlign: 'center',
             }}
           >
-            {cdrRunning ? '…' : cdrError ? '⚠ Retry' : cdrByChain ? '✓ Done' : 'Annotate'}
+            {cdrRunning ? '…' : cdrError ? '⚠ CDR' : spansByChain ? '✓ CDR' : 'CDR'}
           </button>
         )}
 
@@ -376,8 +455,8 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
         minWidth: 0,
       }}>
         {displayRows.map((row, idx) => {
-          // Small extra gap before first row of a new chain (except very first)
           const isChainStart = row.isFirstRow && row.chainIdx > 0
+          const chainSpans   = spansByChain?.get(row.chain.chain) ?? null
 
           return (
             <div
@@ -393,10 +472,10 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
               <div style={{
                 width: CHAIN_PILL_W,
                 flexShrink: 0,
-                height: ROW_H,
+                height: ROW_H + (chainSpans ? ANNOT_H : 0),
                 display: 'flex',
-                alignItems: 'flex-end',
-                paddingBottom: 1,
+                alignItems: chainSpans ? 'center' : 'flex-end',
+                paddingBottom: chainSpans ? 0 : 1,
               }}>
                 {row.isFirstRow ? (
                   <span style={{
@@ -417,7 +496,6 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
                     {row.chain.chain}
                   </span>
                 ) : (
-                  // Subtle continuation indicator
                   <span style={{
                     fontSize: 7,
                     color: 'var(--color-text-disabled)',
@@ -430,8 +508,17 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
                 )}
               </div>
 
-              {/* Number row + AA row, stacked */}
+              {/* Annotation track + number row + AA row, stacked */}
               <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+
+                {/* CDR/FW annotation track */}
+                {chainSpans && (
+                  <AnnotationTrack
+                    rowStartIdx={row.rowStartIdx}
+                    rowLength={row.residues.length}
+                    spans={chainSpans}
+                  />
+                )}
 
                 {/* Residue-number annotation line */}
                 <div style={{ display: 'flex', height: NUM_H }}>

@@ -26,13 +26,97 @@ type ColorMode = 'chemical' | 'conservation' | 'none'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Pick the longest chain per structure (proxy for the heavy chain in ab designs). */
-function pickChain(chains: { chain: string; seq: string }[]): string | null {
-  if (chains.length === 0) return null
-  return chains.reduce((best, c) => c.seq.length > best.seq.length ? c : best).seq
+/**
+ * From a set of per-structure chain lists, build a map of sequence → how many structures
+ * contain that exact sequence.  Chains shared by many structures are the conserved target;
+ * chains unique to one structure are the variable binder.
+ */
+// TODO: Binder chain auto-detection (future enhancement)
+// The current approach picks the chain with the lowest occurrence count across all structures
+// (i.e. the most unique/variable chain = binder). This works well when loading a folder of
+// complexes against the same target, where the target sequence is conserved and the binder
+// varies. A future improvement would let users explicitly designate binder/target chains —
+// either globally (via the interface detection panel) or per-structure — so the alignment
+// can be driven by that explicit assignment rather than sequence variability heuristics.
+function buildSeqCounts(
+  rows: { filePath: string | null; name: string }[],
+  sequences: Map<string, { chain: string; seq: string }[]>,
+): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const row of rows) {
+    const chains = sequences.get(row.filePath ?? row.name) ?? sequences.get(row.name)
+    if (!chains) continue
+    for (const { seq } of chains) {
+      if (seq.length >= 4) counts.set(seq, (counts.get(seq) ?? 0) + 1)
+    }
+  }
+  return counts
 }
 
+/**
+ * Pick the most-unique chain for one structure: lowest occurrence count across all
+ * loaded structures.  Ties broken by shortest chain (binders are typically shorter
+ * than targets).  Falls back gracefully for single-chain structures.
+ */
+function pickBinderChain(
+  chains: { chain: string; seq: string }[],
+  seqCounts: Map<string, number>,
+): string | null {
+  const eligible = chains.filter(c => c.seq.length >= 4)
+  if (eligible.length === 0) return null
+  return eligible.reduce((best, c) => {
+    const bc = seqCounts.get(best.seq) ?? 0
+    const cc = seqCounts.get(c.seq) ?? 0
+    if (cc !== bc) return cc < bc ? c : best   // lower count = more unique = binder
+    return c.seq.length < best.seq.length ? c : best  // shorter wins on tie
+  }).seq
+}
+
+// ── Legend data ───────────────────────────────────────────────────────────────
+
+const LEGEND_ITEMS_CHEMICAL = [
+  { bg: 'rgba(255,155,60,0.85)',   label: 'Nonpolar' },
+  { bg: 'rgba(72,200,110,0.85)',   label: 'Polar' },
+  { bg: 'rgba(80,140,255,0.85)',   label: '+Charged' },
+  { bg: 'rgba(255,80,80,0.85)',    label: '−Charged' },
+  { bg: 'rgba(160,160,180,0.85)', label: 'Gly' },
+] as const
+
+const LEGEND_H = 22   // extra canvas height for legend strip
+
 // ── PNG export ────────────────────────────────────────────────────────────────
+
+function drawPngLegend(
+  ctx: CanvasRenderingContext2D,
+  yTop: number,
+  colorMode: ColorMode,
+  isDark: boolean,
+): void {
+  const labelColor = isDark ? '#8faac8' : '#4a607c'
+  ctx.font = `9px JetBrains Mono, monospace`
+
+  if (colorMode === 'chemical') {
+    let x = NAME_W
+    for (const { bg, label } of LEGEND_ITEMS_CHEMICAL) {
+      ctx.fillStyle = bg
+      ctx.fillRect(x, yTop + 6, 9, 9)
+      ctx.fillStyle = labelColor
+      ctx.fillText(label, x + 12, yTop + 14)
+      x += 12 + ctx.measureText(label).width + 14
+    }
+  }
+
+  if (colorMode === 'conservation') {
+    const x = NAME_W
+    const grad = ctx.createLinearGradient(x, 0, x + 80, 0)
+    grad.addColorStop(0, 'rgba(128,128,128,0.15)')
+    grad.addColorStop(1, isDark ? 'rgba(0,210,100,0.70)' : 'rgba(0,150,70,0.57)')
+    ctx.fillStyle = grad
+    ctx.fillRect(x, yTop + 6, 80, 9)
+    ctx.fillStyle = labelColor
+    ctx.fillText('Low → High conservation', x + 84, yTop + 14)
+  }
+}
 
 function exportPng(
   names: string[],
@@ -45,8 +129,10 @@ function exportPng(
   const len = aligned[0]?.length ?? 0
   if (!n || !len) return
 
+  const hasLegend = colorMode !== 'none'
+  const legendOffset = hasLegend ? LEGEND_H : 0
   const W = NAME_W + len * CELL_W
-  const H = NUM_H + CONS_H + n * CELL_H + 4
+  const H = legendOffset + NUM_H + CONS_H + n * CELL_H + 4
   const dpr = window.devicePixelRatio || 1
   const canvas = document.createElement('canvas')
   canvas.width  = W * dpr
@@ -57,11 +143,18 @@ function exportPng(
   ctx.fillStyle = isDark ? '#0e1525' : '#f8f9fc'
   ctx.fillRect(0, 0, W, H)
 
+  // Legend (top strip, mirrors UI position)
+  if (hasLegend) {
+    ctx.fillStyle = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'
+    ctx.fillRect(0, 0, W, LEGEND_H)
+    drawPngLegend(ctx, 0, colorMode, isDark)
+  }
+
   // Position numbers
   ctx.font = `${NUM_H - 1}px JetBrains Mono, monospace`
   ctx.fillStyle = isDark ? '#8faac8' : '#4a607c'
   for (let col = 0; col < len; col += 10) {
-    ctx.fillText(String(col + 1), NAME_W + col * CELL_W, NUM_H - 1)
+    ctx.fillText(String(col + 1), NAME_W + col * CELL_W, legendOffset + NUM_H - 1)
   }
 
   // Conservation bar
@@ -69,14 +162,14 @@ function exportPng(
     const bg = conservationColor(conservation[col] ?? 0, isDark)
     if (bg !== 'transparent') {
       ctx.fillStyle = bg
-      ctx.fillRect(NAME_W + col * CELL_W, NUM_H, CELL_W, CONS_H)
+      ctx.fillRect(NAME_W + col * CELL_W, legendOffset + NUM_H, CELL_W, CONS_H)
     }
   }
 
   // Sequence rows
   ctx.font = `bold ${CELL_H - 3}px JetBrains Mono, monospace`
   for (let row = 0; row < n; row++) {
-    const y = NUM_H + CONS_H + row * CELL_H
+    const y = legendOffset + NUM_H + CONS_H + row * CELL_H
     ctx.fillStyle = isDark ? '#b0c8e4' : '#374151'
     ctx.fillText(names[row].slice(0, 12), 2, y + CELL_H - 3)
 
@@ -103,6 +196,45 @@ function exportPng(
   }, 'image/png')
 }
 
+// ── Legend component (UI) ─────────────────────────────────────────────────────
+
+function AlignmentLegend({ mode }: { mode: ColorMode }) {
+  if (mode === 'none') return null
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+      padding: '5px 10px', flexShrink: 0,
+      borderBottom: '1px solid var(--color-border)',
+      background: 'var(--color-secondary-bg)',
+    }}>
+      {mode === 'chemical' && LEGEND_ITEMS_CHEMICAL.map(({ bg, label }) => (
+        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{
+            width: 9, height: 9, borderRadius: 2, background: bg, flexShrink: 0,
+            border: '1px solid rgba(128,128,128,0.15)',
+          }} />
+          <span style={{ fontSize: 9.5, color: 'var(--color-text-secondary)', lineHeight: 1, whiteSpace: 'nowrap' }}>
+            {label}
+          </span>
+        </div>
+      ))}
+      {mode === 'conservation' && (
+        <>
+          <div style={{
+            width: 60, height: 9, borderRadius: 2,
+            background: 'linear-gradient(to right, rgba(128,128,128,0.15), rgba(0,180,80,0.65))',
+            flexShrink: 0,
+          }} />
+          <span style={{ fontSize: 9.5, color: 'var(--color-text-secondary)', lineHeight: 1, whiteSpace: 'nowrap' }}>
+            Low → High conservation
+          </span>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface AlignmentViewerProps {
@@ -110,7 +242,7 @@ interface AlignmentViewerProps {
 }
 
 export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
-  const { rows, allColumns, filterText } = useMetricsStore()
+  const { rows, filterText } = useMetricsStore()
   const { rules: filterRules }           = useFilterStore()
   const { sequences }                    = useSequenceStore()
   const { files, setActiveFile }         = useFileStore()
@@ -119,15 +251,19 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
 
   const activeRows = useActiveRows(rows, filterText, filterRules)
 
-  // Build star alignment from active rows that have stored sequences
+  // Build star alignment from active rows that have stored sequences.
+  // Two-pass: first count how often each sequence appears across all structures
+  // (the shared target scores high; the unique binder scores 1), then per structure
+  // pick the chain with the lowest count (= most likely binder).
   const { aligned, names, conservation } = useMemo(() => {
+    const seqCounts = buildSeqCounts(activeRows, sequences)
     const nameList: string[] = []
     const seqList:  string[] = []
     for (const row of activeRows) {
-      const chains = sequences.get(row.name)
-      if (!chains) continue
-      const seq = pickChain(chains)
-      if (!seq || seq.length < 4) continue
+      const chains = sequences.get(row.filePath ?? row.name) ?? sequences.get(row.name)
+      if (!chains?.length) continue
+      const seq = pickBinderChain(chains, seqCounts)
+      if (!seq) continue
       nameList.push(row.name)
       seqList.push(seq)
     }
@@ -152,9 +288,9 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
 
   // Empty-state reason
   const emptyReason =
-    allColumns.length === 0
+    rows.length === 0
       ? 'no-metrics'
-      : sequences.size === 0 && rows.length > 0
+      : sequences.size === 0
         ? 'no-sequences'
         : 'too-few'
 
@@ -218,6 +354,9 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
           </>
         )}
       </div>
+
+      {/* ── Legend ───────────────────────────────────────────────────────── */}
+      {hasData && <AlignmentLegend mode={colorMode} />}
 
       {/* ── Alignment grid ──────────────────────────────────────────────── */}
       {hasData && (

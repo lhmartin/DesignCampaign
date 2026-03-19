@@ -233,9 +233,10 @@ export const useMetricsStore = create<MetricsStore>()(
           filePath: files[i].path,
           metrics: m as unknown as Record<string, number>,
         })
-        // Collect sequences for batch merge after the loop
+        // Collect sequences keyed by filePath — avoids name-mismatch when sidecar
+        // JSON overrides the display name before calculateAll runs.
         const chainData = parseChainSequences(content)
-        seqBatch.set(name, Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence })))
+        seqBatch.set(files[i].path, Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence })))
       } catch { /* skip unreadable files */ }
 
       // Push incremental update and yield to event loop every file

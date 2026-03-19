@@ -90,6 +90,7 @@ def _antpack_number(args: dict) -> list:
         else:
             results.append({
                 'name': name, 'chain': chain_id, 'scheme': scheme,
+                'chain_type': best['chain_type'],
                 'percent_identity': best['pct'],
                 'assignments': best['assignments'],
                 'error': best['error'],
