@@ -270,7 +270,7 @@ interface GridProps {
   onLoad: (name: string) => void
 }
 
-function AlignmentGrid({ aligned, names, conservation, colorMode, isDark, onLoad }: GridProps) {
+const AlignmentGrid = memo(function AlignmentGrid({ aligned, names, conservation, colorMode, isDark, onLoad }: GridProps) {
   const n   = names.length
   const len = aligned[0]?.length ?? 0
   if (!n || !len) return null
@@ -321,7 +321,7 @@ function AlignmentGrid({ aligned, names, conservation, colorMode, isDark, onLoad
       ))}
     </div>
   )
-}
+})
 
 // Memoised row — only re-renders when its own data changes
 const SequenceRow = memo(function SequenceRow({ name, seq, conservation, colorMode, isDark, onLoad }: {

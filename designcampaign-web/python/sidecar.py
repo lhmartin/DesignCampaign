@@ -31,6 +31,18 @@ def _imgt_region(num_str: str) -> str | None:
 
 # ── AntPack numbering action ──────────────────────────────────────────────────
 
+# ── Cached annotators (loaded once per sidecar process) ──────────────────────
+# AntPack loads model weights on construction; caching avoids reloading per sequence.
+_annotator_cache: dict = {}
+
+def _get_annotator(chain_type: str, scheme: str):
+    key = (chain_type, scheme)
+    if key not in _annotator_cache:
+        from antpack import SingleChainAnnotator  # type: ignore  # noqa: PLC0415
+        _annotator_cache[key] = SingleChainAnnotator(allowed_chain=chain_type, scheme=scheme)
+    return _annotator_cache[key]
+
+
 def _antpack_number(args: dict) -> list:
     """
     args = {
@@ -40,8 +52,6 @@ def _antpack_number(args: dict) -> list:
     Returns list of {name, chain, scheme, percent_identity, assignments, error}.
     assignments = per-residue CDR/FW label (same length as input sequence).
     """
-    from antpack import SingleChainAnnotator  # type: ignore  # noqa: PLC0415
-
     scheme = args.get('scheme', 'imgt')
     results = []
 
@@ -54,7 +64,7 @@ def _antpack_number(args: dict) -> list:
         best: dict | None = None
         for chain_type in ('H', 'L', 'K'):
             try:
-                ann = SingleChainAnnotator(allowed_chain=chain_type, scheme=scheme)
+                ann = _get_annotator(chain_type, scheme)
                 numbering, pct_id, aligned_seq, err = ann.analyze_seq(seq)
                 if best is None or float(pct_id) > best['pct']:
                     # Build per-residue assignments (skip gap '-' positions)

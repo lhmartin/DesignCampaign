@@ -45,9 +45,6 @@ interface AntPackStore {
     scheme?: string,
   ): Promise<void>
 
-  getAnnotations(filePath: string): ChainCdrAnnotation[] | undefined
-  isRunning(filePath: string): boolean
-  getError(filePath: string): string | undefined
   clearAnnotations(filePath: string): void
 }
 
@@ -103,18 +100,6 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
         }
       })
     }
-  },
-
-  getAnnotations(filePath) {
-    return get().annotations.get(filePath)
-  },
-
-  isRunning(filePath) {
-    return get().running.has(filePath)
-  },
-
-  getError(filePath) {
-    return get().errors.get(filePath)
   },
 
   clearAnnotations(filePath) {

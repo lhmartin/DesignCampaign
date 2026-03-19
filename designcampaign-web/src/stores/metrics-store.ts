@@ -220,6 +220,8 @@ export const useMetricsStore = create<MetricsStore>()(
   calculateAll: async (files, readFile) => {
     set({ isCalculating: true, progress: 0 })
     const results: ProteinMetrics[] = []
+    // Batch sequence updates — merged once after the loop (O(N) instead of O(N²) Map copies)
+    const seqBatch = new Map<string, import('@/stores/sequence-store').ChainSeq[]>()
 
     for (let i = 0; i < files.length; i++) {
       try {
@@ -231,10 +233,9 @@ export const useMetricsStore = create<MetricsStore>()(
           filePath: files[i].path,
           metrics: m as unknown as Record<string, number>,
         })
-        // Also extract sequences for the Alignment viewer
+        // Collect sequences for batch merge after the loop
         const chainData = parseChainSequences(content)
-        const chains = Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence }))
-        useSequenceStore.getState().setSequences(name, chains)
+        seqBatch.set(name, Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence })))
       } catch { /* skip unreadable files */ }
 
       // Push incremental update and yield to event loop every file
@@ -245,6 +246,9 @@ export const useMetricsStore = create<MetricsStore>()(
       }))
       await new Promise(r => setTimeout(r, 0))
     }
+
+    // Single O(N) merge — one Map copy for all N structures
+    if (seqBatch.size > 0) useSequenceStore.getState().mergeSequences(seqBatch)
 
     set({ isCalculating: false, progress: 1 })
   },

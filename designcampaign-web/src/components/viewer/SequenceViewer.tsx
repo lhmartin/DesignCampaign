@@ -140,7 +140,11 @@ interface SequenceViewerProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 export function SequenceViewer({ chains, plugin, residueValues, structurePath }: SequenceViewerProps) {
   const { selectedResidues, addResidue, clearSelection, selectAll } = useSelectionStore()
-  const { annotate, getAnnotations, isRunning, getError }           = useAntpackStore()
+  const annotate      = useAntpackStore(s => s.annotate)
+  // Subscribe directly to the relevant slices so the component re-renders when annotations arrive
+  const cdrAnnotations = useAntpackStore(s => structurePath ? s.annotations.get(structurePath) : undefined)
+  const cdrRunning     = useAntpackStore(s => !!structurePath && s.running.has(structurePath))
+  const cdrError       = useAntpackStore(s => structurePath ? s.errors.get(structurePath) : undefined)
 
   const [colorMode, setColorMode]       = useState<ColorMode>('chemical')
   const [hoveredKey, setHoveredKey]     = useState<string | null>(null)
@@ -195,18 +199,13 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
     })
   , [chains, residuesPerRow])
 
-  // CDR annotations for the current structure, indexed by chain id
+  // CDR annotations indexed by chain id — recomputes whenever the store slice changes
   const cdrByChain = useMemo(() => {
-    if (!structurePath) return null
-    const annots = getAnnotations(structurePath)
-    if (!annots) return null
+    if (!cdrAnnotations) return null
     const map = new Map<string, (CdrRegionName | null)[]>()
-    for (const a of annots) map.set(a.chain, a.assignments)
+    for (const a of cdrAnnotations) map.set(a.chain, a.assignments)
     return map
-  }, [structurePath, getAnnotations])
-
-  const cdrRunning  = structurePath ? isRunning(structurePath)  : false
-  const cdrError    = structurePath ? getError(structurePath)    : undefined
+  }, [cdrAnnotations])
 
   if (chains.length === 0) return null
 
@@ -218,7 +217,6 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
   }
 
   // ── Cell color by mode ──────────────────────────────────────────────────────
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const cellColors = useCallback((code: string, key: string, chainId: string, resIdx: number): { bg: string; fg: string } => {
     if (colorMode === 'none')           return { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' }
     if (colorMode === 'hydrophobicity') return hydroColor(code)

@@ -7,6 +7,7 @@ import { useSelectionStore } from '@/stores/selection-store'
 import { useComparisonStore } from '@/stores/comparison-store'
 import { useInterfaceStore } from '@/stores/interface-store'
 import { readFileContent } from '@/lib/fsa'
+import { useFileStore } from '@/stores/file-store'
 import { type ChainSequence, THREE_TO_ONE } from '@/lib/sequence'
 import { getFileFormat } from '@/lib/utils'
 import { syncToMolstar } from '@/lib/mol-selection-sync'
@@ -335,7 +336,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
     const [seqData, setSeqData] = useState<{ seq: ChainSequence[]; values: Map<string, number> }>(
       { seq: [], values: new Map() }
     )
-    const [loadedPath, setLoadedPath] = useState<string | undefined>(undefined)
+    const activeFile = useFileStore(s => s.activeFile)
     const { toggleResidue, addResidue, clearSelection, selectedResidues } = useSelectionStore()
 
     // Sync selection store → 3D viewer so external selectAll() calls (InterfaceGroup, etc.) highlight in Mol*.
@@ -369,7 +370,6 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
         setStyle('cartoon')
         setColorScheme('sequence-id')
         clearSelection()
-        setLoadedPath(filePath)
       },
       loadAsComparison: async (filePath: string) => {
         if (!plugin) { onError?.('Mol* viewer not initialized'); return }
@@ -492,7 +492,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
             chains={seqData.seq}
             plugin={plugin}
             residueValues={seqData.values}
-            structurePath={loadedPath}
+            structurePath={activeFile ?? undefined}
           />
         )}
 
