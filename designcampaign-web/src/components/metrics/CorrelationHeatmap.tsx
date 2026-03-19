@@ -1,23 +1,10 @@
-import { useEffect, useRef, useMemo, useState } from 'react'
+import { useEffect, useRef, useMemo } from 'react'
 import { useMetricsStore } from '@/stores/metrics-store'
 import { useFilterStore } from '@/stores/filter-store'
 import { shortLabel } from '@/lib/metrics-labels'
-
-// ── Theme hook (mirrors ScatterPlot) ─────────────────────────────────────────
-
-function useIsDark(): boolean {
-  const [isDark, setIsDark] = useState(() =>
-    document.documentElement.classList.contains('dark')
-  )
-  useEffect(() => {
-    const obs = new MutationObserver(() =>
-      setIsDark(document.documentElement.classList.contains('dark'))
-    )
-    obs.observe(document.documentElement, { attributeFilter: ['class'] })
-    return () => obs.disconnect()
-  }, [])
-  return isDark
-}
+import { useIsDark } from '@/hooks/useIsDark'
+import { useActiveRows } from '@/hooks/useActiveRows'
+import { PLOTLY_DARK, PLOTLY_LIGHT } from '@/lib/constants/plotly-theme'
 
 // ── Pearson r ─────────────────────────────────────────────────────────────────
 
@@ -47,6 +34,8 @@ const COLORSCALE: [number, string][] = [
   [1,    '#d6604d'],
 ]
 
+const PLOT_CONFIG = { displayModeBar: false, responsive: true }
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function CorrelationHeatmap() {
@@ -56,58 +45,34 @@ export function CorrelationHeatmap() {
   const { rules: filterRules } = useFilterStore()
   const isDark = useIsDark()
 
-  // Theme-aware colours, matching ScatterPlot's palette
-  const theme = useMemo(() => isDark
-    ? {
-        paper:    'transparent',
-        font:     '#b0c8e4',
-        tick:     '#8faac8',
-        hover:    'rgba(18,24,52,0.96)',
-        hoverTxt: '#c4d4ec',
-        border:   'rgba(0,220,180,0.35)',
-      }
-    : {
-        paper:    'transparent',
-        font:     '#4a607c',
-        tick:     '#4a607c',
-        hover:    '#ffffff',
-        hoverTxt: '#111827',
-        border:   'rgba(0,104,200,0.25)',
-      },
-  [isDark])
+  const theme = useMemo(() => isDark ? PLOTLY_DARK : PLOTLY_LIGHT, [isDark])
 
-  // Compute visible columns and filtered rows (same logic as ScatterPlot)
   const visibleCols = useMemo(
     () => allColumns.filter(c => !hiddenColumns.includes(c)),
     [allColumns, hiddenColumns],
   )
 
-  const activeRows = useMemo(() => {
-    const hasFilters = !!filterText || filterRules.some(r =>
-      r.type === 'residue' ? !!(r.residues?.trim()) : !!(r as { metric?: string }).metric
-    )
-    if (!hasFilters) return rows
-    const { passesFilters } = useFilterStore.getState()
-    return rows.filter(r => {
-      const textOk = !filterText || r.name.toLowerCase().includes(filterText.toLowerCase())
-      return textOk && passesFilters(r.metrics, r.filePath)
-    })
-  }, [rows, filterText, filterRules])
+  const activeRows = useActiveRows(rows, filterText, filterRules)
 
-  // Build NxN Pearson r matrix
+  // Build NxN Pearson r matrix — compute only upper triangle, mirror to lower
   const matrix = useMemo((): number[][] | null => {
     if (activeRows.length < 3 || visibleCols.length < 2) return null
-    return visibleCols.map((colA, i) =>
-      visibleCols.map((colB, j) => {
-        if (i === j) return 1
+    const n = visibleCols.length
+    const mat: number[][] = Array.from({ length: n }, () => Array(n).fill(NaN))
+    for (let i = 0; i < n; i++) {
+      mat[i][i] = 1
+      for (let j = i + 1; j < n; j++) {
         const xs: number[] = [], ys: number[] = []
         for (const r of activeRows) {
-          const x = r.metrics[colA], y = r.metrics[colB]
+          const x = r.metrics[visibleCols[i]], y = r.metrics[visibleCols[j]]
           if (isFinite(x) && isFinite(y)) { xs.push(x); ys.push(y) }
         }
-        return pearsonR(xs, ys)
-      })
-    )
+        const val = pearsonR(xs, ys)
+        mat[i][j] = val
+        mat[j][i] = val
+      }
+    }
+    return mat
   }, [activeRows, visibleCols])
 
   // Build Plotly spec from matrix + theme
@@ -115,6 +80,7 @@ export function CorrelationHeatmap() {
     if (!matrix) return null
 
     const labels = visibleCols.map(c => shortLabel(c))
+    const n = visibleCols.length
 
     const trace = {
       type: 'heatmap',
@@ -136,24 +102,23 @@ export function CorrelationHeatmap() {
       hovertemplate: '%{y} vs %{x}<br>r = %{z:.3f}<extra></extra>',
     }
 
-    // Per-cell r annotations (skip diagonal which is always 1.00)
+    // Per-cell annotations — compute upper triangle and mirror (avoids N² allocations)
     const annotations: object[] = []
-    for (let row = 0; row < visibleCols.length; row++) {
-      for (let col = 0; col < visibleCols.length; col++) {
-        if (row === col) continue
+    for (let row = 0; row < n; row++) {
+      for (let col = row + 1; col < n; col++) {
         const r = matrix[row][col]
         const text = isNaN(r) ? '—' : r.toFixed(2)
         // White text on strongly-coloured cells, themed text near zero
         const fontColor = isNaN(r) || Math.abs(r) <= 0.55 ? theme.tick : '#ffffff'
-        annotations.push({
-          x: labels[col],
-          y: labels[row],
-          text,
+        const annotStyle = {
           font: { size: 9, color: fontColor, family: 'JetBrains Mono, monospace' },
           showarrow: false,
           xref: 'x',
           yref: 'y',
-        })
+          text,
+        }
+        annotations.push({ ...annotStyle, x: labels[col], y: labels[row] })
+        annotations.push({ ...annotStyle, x: labels[row], y: labels[col] })
       }
     }
 
@@ -188,8 +153,6 @@ export function CorrelationHeatmap() {
   const plotSpecRef = useRef(plotSpec)
   useEffect(() => { plotSpecRef.current = plotSpec }, [plotSpec])
   const lastRenderedSpecRef = useRef<typeof plotSpec>(null)
-
-  const PLOT_CONFIG = { displayModeBar: false, responsive: true }
 
   // Render / update when spec changes
   useEffect(() => {
@@ -278,10 +241,7 @@ export function CorrelationHeatmap() {
       )}
 
       {/* Plotly canvas — always in the DOM so ResizeObserver attaches on mount */}
-      <div
-        ref={plotRef}
-        style={{ flex: 1, minHeight: 0 }}
-      />
+      <div ref={plotRef} style={{ flex: 1, minHeight: 0 }} />
 
       {/* Empty state overlay */}
       {!matrix && (
@@ -304,8 +264,8 @@ export function CorrelationHeatmap() {
             <rect x="21" y="21" width="11" height="11" rx="1.5" fill="var(--color-accent)" opacity="0.9"/>
           </svg>
           <p style={{ fontSize: 12, color: 'var(--color-text-disabled)', margin: 0, lineHeight: 1.6 }}>
-            {allColumns.length < 2
-              ? <>Need at least 2 metric columns.<br/>Open a folder and calculate metrics.</>
+            {visibleCols.length < 2
+              ? <>Need at least 2 visible metric columns.<br/>Show hidden metrics or calculate more.</>
               : activeRows.length < 3
                 ? <>Need at least 3 structures with metrics.<br/>Load more files or relax the active filters.</>
                 : 'No data to show.'}
