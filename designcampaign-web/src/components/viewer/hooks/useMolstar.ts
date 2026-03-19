@@ -58,6 +58,9 @@ export function useMolstar(containerRef: RefObject<HTMLDivElement | null>) {
           import('../themes/interface-theme')
             .then(m => m.registerInterfaceTheme(p))
             .catch(console.warn)
+          import('../themes/rmsd-deviation-theme')
+            .then(m => m.registerRmsdDeviationTheme(p))
+            .catch(console.warn)
         } else {
           p.dispose()
         }

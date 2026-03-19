@@ -9,6 +9,7 @@ import { CorrelationHeatmap } from '@/components/metrics/CorrelationHeatmap'
 import { AlignmentViewer } from '@/components/metrics/AlignmentViewer'
 import { SelectionPanel } from '@/components/selection/SelectionPanel'
 import { FilterPanel } from '@/components/filter/FilterPanel'
+import { UniProtPanel } from '@/components/metrics/UniProtPanel'
 import { useFileStore } from '@/stores/file-store'
 import { UpdateBanner } from './UpdateBanner'
 import { PythonSetupModal } from './PythonSetupModal'
@@ -153,6 +154,7 @@ export function AppShell() {
                 <TabsTrigger value="alignment">Align</TabsTrigger>
                 <TabsTrigger value="filter">Filter</TabsTrigger>
                 <TabsTrigger value="selection">Selection</TabsTrigger>
+                <TabsTrigger value="uniprot">UniProt</TabsTrigger>
               </TabsList>
 
               <TabsContent value="files">
@@ -181,6 +183,10 @@ export function AppShell() {
 
               <TabsContent value="selection">
                 <SelectionPanel />
+              </TabsContent>
+
+              <TabsContent value="uniprot">
+                <UniProtPanel />
               </TabsContent>
             </Tabs>
           </div>

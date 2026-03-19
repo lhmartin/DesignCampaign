@@ -13,6 +13,8 @@ import { getFileFormat } from '@/lib/utils'
 import { syncToMolstar } from '@/lib/mol-selection-sync'
 import { extractCAPositions, applyStructureTransform } from '@/lib/mol-alignment'
 import { useAntpackStore } from '@/stores/antpack-store'
+import { useRmsdStore } from '@/stores/rmsd-store'
+import { useMetricsStore } from '@/stores/metrics-store'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -46,6 +48,62 @@ function IconLayers({ size = 14 }: { size?: number }) {
       <line x1="1" y1="4" x2="5" y2="2" stroke="currentColor" strokeWidth="1.1"/>
       <line x1="9" y1="4" x2="13" y2="2" stroke="currentColor" strokeWidth="1.1"/>
     </svg>
+  )
+}
+
+// ─── RMSD reference button (toolbar) ─────────────────────────────────────────
+
+function RmsdRefButton({ activeFile }: { activeFile: string | null }) {
+  const { referenceFilePath, setReference, clearReference, computeAll, running } = useRmsdStore()
+  const rows = useMetricsStore(s => s.rows)
+
+  if (!activeFile) return null
+
+  const isRef   = referenceFilePath === activeFile
+  const hasRef  = !!referenceFilePath
+  const refName = referenceFilePath ? referenceFilePath.split(/[/\\]/).pop() ?? referenceFilePath : null
+
+  const handleClick = async () => {
+    if (hasRef) {
+      clearReference()
+    } else {
+      try {
+        const pdbText = await window.electronAPI?.readFile(activeFile)
+        if (!pdbText) return
+        setReference(activeFile, pdbText)
+        await computeAll(rows, path => window.electronAPI!.readFile(path))
+      } catch { /* ignore */ }
+    }
+  }
+
+  const accent   = isRef ? 'var(--color-accent)' : hasRef ? 'rgba(251,191,36,0.9)' : 'var(--color-text-secondary)'
+  const border   = isRef
+    ? 'color-mix(in srgb, var(--color-accent) 40%, transparent)'
+    : hasRef ? 'rgba(251,191,36,0.4)' : 'var(--color-border)'
+  const bg       = isRef
+    ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)'
+    : hasRef ? 'rgba(251,191,36,0.08)' : 'transparent'
+
+  return (
+    <button
+      onClick={() => void handleClick()}
+      disabled={running}
+      title={
+        running   ? 'Computing RMSD…' :
+        isRef     ? 'This structure is the RMSD reference — click to clear' :
+        hasRef    ? `Reference: ${refName} — click to clear` :
+                    'Set active structure as RMSD reference and compute for all loaded structures'
+      }
+      style={{
+        alignSelf: 'center', margin: '0 2px', padding: '2px 8px',
+        borderRadius: 4, fontSize: 9, fontFamily: 'Outfit, sans-serif',
+        fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0,
+        cursor: running ? 'wait' : 'pointer',
+        border: `1px solid ${border}`, background: bg, color: accent,
+      }}
+    >
+      {running ? 'Computing RMSD…' : hasRef ? `✓ ref: ${refName}` : 'Set RMSD ref'}
+    </button>
   )
 }
 
@@ -568,6 +626,14 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
       applyColorScheme(plugin, colorScheme).catch(console.error)
     }, [plugin, colorScheme])
 
+    // Re-apply RMSD deviation theme whenever new deviations are computed for the active file.
+    const activeFileDeviations = useRmsdStore(s => activeFile ? s.deviationsByPath.get(activeFile) : undefined)
+    useEffect(() => {
+      if (!plugin || colorScheme !== 'rmsd-deviation') return
+      applyColorScheme(plugin, 'rmsd-deviation').catch(console.error)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeFileDeviations])
+
     useEffect(() => {
       if (!plugin?.canvas3d) return
       try { (plugin.canvas3d as any).setProps({ camera: { mode: cameraMode } }) } catch { /* best effort */ }
@@ -661,6 +727,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
                 onResetView={() => { try { (plugin as any).managers.camera.reset() } catch { /* best effort */ } }}
               />
             </div>
+            <RmsdRefButton activeFile={activeFile} />
             <CdrButton chains={seqData.seq} activeFile={activeFile} onNeedSetup={onNeedPythonSetup} />
             <InterfaceMenu plugin={plugin} />
             <CompareMenu plugin={plugin} />

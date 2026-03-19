@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { useSelectionStore } from '@/stores/selection-store'
 
 export type RepresentationStyle = 'cartoon' | 'ball-and-stick' | 'spacefill' | 'line' | 'gaussian-surface'
-export type ColorScheme = 'sequence-id' | 'chain-id' | 'secondary-structure' | 'plddt-bands' | 'hydrophobicity' | 'element-symbol'
+export type ColorScheme = 'sequence-id' | 'chain-id' | 'secondary-structure' | 'plddt-bands' | 'hydrophobicity' | 'element-symbol' | 'rmsd-deviation'
 
 const STYLE_OPTIONS: { value: RepresentationStyle; label: string }[] = [
   { value: 'cartoon',          label: 'Cartoon' },
@@ -20,6 +20,7 @@ const COLOR_OPTIONS: { value: ColorScheme; label: string }[] = [
   { value: 'plddt-bands',         label: 'pLDDT / B-factor' },
   { value: 'hydrophobicity',      label: 'Hydrophobicity' },
   { value: 'element-symbol',      label: 'Element' },
+  { value: 'rmsd-deviation',      label: 'RMSD Deviation' },
 ]
 
 // ─── Inline SVG icons ─────────────────────────────────────────────────────────

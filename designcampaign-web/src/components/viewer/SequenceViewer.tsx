@@ -6,6 +6,7 @@ import { useSelectionStore } from '@/stores/selection-store'
 import { syncToMolstar } from '@/lib/mol-selection-sync'
 import { useAntpackStore, CDR_CONFIDENCE_THRESHOLDS } from '@/stores/antpack-store'
 import type { CdrRegionName, CdrConfidenceFilter } from '@/stores/antpack-store'
+import { useRmsdStore } from '@/stores/rmsd-store'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -23,7 +24,7 @@ const CONTROLS_W   = 90   // px width of left colour-mode controls
 const CHAIN_PILL_W = 36   // px width reserved for chain label
 
 // ─── Color mode ───────────────────────────────────────────────────────────────
-type ColorMode = 'none' | 'chemical' | 'hydrophobicity' | 'plddt'
+type ColorMode = 'none' | 'chemical' | 'hydrophobicity' | 'plddt' | 'rmsd'
 
 // ─── CDR annotation track colors ──────────────────────────────────────────────
 const REGION_COLORS: Record<CdrRegionName, { bg: string; fg: string }> = {
@@ -157,6 +158,16 @@ function ColorLegend({ mode }: { mode: ColorMode }) {
     </div>
   )
 
+  if (mode === 'rmsd') return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
+      <div style={{ height: 9, borderRadius: 2, background: 'linear-gradient(to right, rgba(255,255,255,0.25), #f97316, #ef4444)' }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>0 Å</span>
+        <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>≥3 Å</span>
+      </div>
+    </div>
+  )
+
   // plddt
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
@@ -174,6 +185,17 @@ function hydroColor(code: string): { bg: string; fg: string } {
   const t = Math.max(0, Math.min(1, (h + 4.5) / 9))
   // #3b82f6 (blue) → #f97316 (orange)
   return { bg: lerpColor(t, [59, 130, 246], [249, 115, 22]), fg: '#ffffff' }
+}
+
+/** deviation (Å) → background colour on white → orange → red ramp, saturating at 3 Å. */
+function rmsdColor(dev: number | undefined): { bg: string; fg: string } {
+  if (dev === undefined) return { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' }
+  const t = Math.min(1, dev / 3)
+  if (t < 0.01) return { bg: 'rgba(255,255,255,0.20)', fg: 'var(--color-text-primary)' }
+  const r = t <= 0.5
+    ? lerpColor(t * 2,       [255, 255, 255], [249, 115,  22])
+    : lerpColor((t - 0.5) * 2, [249, 115,  22], [239,  68,  68])
+  return { bg: r, fg: t > 0.6 ? '#ffffff' : '#0a0e1a' }
 }
 
 function plddtColor(value: number | undefined): { bg: string; fg: string } {
@@ -218,9 +240,11 @@ interface SequenceViewerProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 export function SequenceViewer({ chains, plugin, residueValues, structurePath }: SequenceViewerProps) {
   const { selectedResidues, addResidue, clearSelection, selectAll } = useSelectionStore()
-  const cdrAnnotations      = useAntpackStore(s => structurePath ? s.annotations.get(structurePath) : undefined)
-  const cdrConfidenceFilter = useAntpackStore(s => s.cdrConfidenceFilter)
+  const cdrAnnotations         = useAntpackStore(s => structurePath ? s.annotations.get(structurePath) : undefined)
+  const cdrConfidenceFilter    = useAntpackStore(s => s.cdrConfidenceFilter)
   const setCdrConfidenceFilter = useAntpackStore(s => s.setCdrConfidenceFilter)
+  const rmsdDeviations         = useRmsdStore(s => structurePath ? s.deviationsByPath.get(structurePath) : undefined)
+  const hasRmsd                = !!rmsdDeviations
 
   const [colorMode, setColorMode]       = useState<ColorMode>('chemical')
   const [hoveredKey, setHoveredKey]     = useState<string | null>(null)
@@ -292,8 +316,9 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
     if (colorMode === 'none')           return { bg: 'rgba(120,120,140,0.10)', fg: 'var(--color-text-disabled)' }
     if (colorMode === 'hydrophobicity') return hydroColor(code)
     if (colorMode === 'plddt')          return plddtColor(residueValues?.get(key))
+    if (colorMode === 'rmsd')           return rmsdColor(rmsdDeviations?.get(key))
     return residueColor(code)
-  }, [colorMode, residueValues])
+  }, [colorMode, residueValues, rmsdDeviations])
 
   // ── Event handlers ──────────────────────────────────────────────────────────
   function handleCellMouseDown(
@@ -395,6 +420,7 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
           <option value="chemical">Chem</option>
           <option value="hydrophobicity">Hydro</option>
           <option value="plddt">pLDDT</option>
+          <option value="rmsd" disabled={!hasRmsd}>RMSD dev{hasRmsd ? '' : ' (no ref)'}</option>
         </select>
 
         {/* Legend */}
