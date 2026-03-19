@@ -4,7 +4,8 @@ import { residueColor, HYDROPHOBICITY_SCALE } from '@/lib/sequence'
 import { lerpColor } from '@/lib/constants/colors'
 import { useSelectionStore } from '@/stores/selection-store'
 import { syncToMolstar } from '@/lib/mol-selection-sync'
-import { useAntpackStore, type CdrRegionName } from '@/stores/antpack-store'
+import { useAntpackStore } from '@/stores/antpack-store'
+import type { CdrRegionName } from '@/stores/antpack-store'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -217,10 +218,7 @@ interface SequenceViewerProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 export function SequenceViewer({ chains, plugin, residueValues, structurePath }: SequenceViewerProps) {
   const { selectedResidues, addResidue, clearSelection, selectAll } = useSelectionStore()
-  const annotate       = useAntpackStore(s => s.annotate)
   const cdrAnnotations = useAntpackStore(s => structurePath ? s.annotations.get(structurePath) : undefined)
-  const cdrRunning     = useAntpackStore(s => !!structurePath && s.running.has(structurePath))
-  const cdrError       = useAntpackStore(s => structurePath ? s.errors.get(structurePath) : undefined)
 
   const [colorMode, setColorMode]       = useState<ColorMode>('chemical')
   const [hoveredKey, setHoveredKey]     = useState<string | null>(null)
@@ -284,12 +282,6 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
   }, [spansByChain])
 
   if (chains.length === 0) return null
-
-  // ── CDR annotate handler ────────────────────────────────────────────────────
-  function handleAnnotateCdr() {
-    if (!structurePath) return
-    void annotate(structurePath, chains)
-  }
 
   // ── Cell color by mode ──────────────────────────────────────────────────────
   const cellColors = useCallback((code: string, key: string, _chainId: string, _resIdx: number): { bg: string; fg: string } => {
@@ -400,44 +392,6 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
           <option value="hydrophobicity">Hydro</option>
           <option value="plddt">pLDDT</option>
         </select>
-
-        {/* CDR annotation button — always visible when a structure is loaded */}
-        {structurePath && (
-          <button
-            onClick={handleAnnotateCdr}
-            disabled={cdrRunning}
-            title={cdrError ?? (spansByChain ? 'Re-run AntPack CDR annotation' : 'Run AntPack CDR annotation (IMGT scheme)')}
-            style={{
-              marginTop: 5,
-              fontSize: 9,
-              fontFamily: 'Outfit, sans-serif',
-              fontWeight: 600,
-              padding: '3px 4px',
-              borderRadius: 4,
-              border: `1px solid ${
-                cdrError    ? 'rgba(239,68,68,0.5)'
-                : spansByChain ? 'color-mix(in srgb, var(--color-accent) 40%, transparent)'
-                : 'var(--color-border)'
-              }`,
-              background: cdrError
-                ? 'rgba(239,68,68,0.10)'
-                : spansByChain
-                  ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)'
-                  : 'transparent',
-              color: cdrError
-                ? 'rgba(239,68,68,0.9)'
-                : spansByChain
-                  ? 'var(--color-accent)'
-                  : 'var(--color-text-secondary)',
-              cursor: cdrRunning ? 'wait' : 'pointer',
-              width: '100%',
-              flexShrink: 0,
-              textAlign: 'center',
-            }}
-          >
-            {cdrRunning ? '…' : cdrError ? '⚠ CDR' : spansByChain ? '✓ CDR' : 'CDR'}
-          </button>
-        )}
 
         {/* Legend */}
         <ColorLegend mode={colorMode} />

@@ -12,6 +12,7 @@ import { type ChainSequence, THREE_TO_ONE } from '@/lib/sequence'
 import { getFileFormat } from '@/lib/utils'
 import { syncToMolstar } from '@/lib/mol-selection-sync'
 import { extractCAPositions, applyStructureTransform } from '@/lib/mol-alignment'
+import { useAntpackStore } from '@/stores/antpack-store'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -44,6 +45,56 @@ function IconLayers({ size = 14 }: { size?: number }) {
       <line x1="1" y1="4" x2="5" y2="2" stroke="currentColor" strokeWidth="1.1"/>
       <line x1="9" y1="4" x2="13" y2="2" stroke="currentColor" strokeWidth="1.1"/>
     </svg>
+  )
+}
+
+// ─── CDR label button (toolbar) ───────────────────────────────────────────────
+
+function CdrButton({ chains, activeFile }: { chains: ChainSequence[]; activeFile: string | null }) {
+  const annotate      = useAntpackStore(s => s.annotate)
+  const cdrRunning    = useAntpackStore(s => !!activeFile && s.running.has(activeFile))
+  const cdrError      = useAntpackStore(s => activeFile ? s.errors.get(activeFile) : undefined)
+  const hasAnnotation = useAntpackStore(s => !!activeFile && s.annotations.has(activeFile))
+
+  if (!activeFile || chains.length === 0) return null
+
+  return (
+    <button
+      onClick={() => void annotate(activeFile, chains)}
+      disabled={cdrRunning}
+      title={cdrError ?? (hasAnnotation
+        ? 'Re-run AntPack CDR annotation (IMGT)'
+        : 'Label CDR/FW regions using AntPack (IMGT scheme)')}
+      style={{
+        alignSelf: 'center',
+        margin: '0 2px',
+        padding: '2px 8px',
+        borderRadius: 4,
+        fontSize: 9,
+        fontFamily: 'Outfit, sans-serif',
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+        cursor: cdrRunning ? 'wait' : 'pointer',
+        border: `1px solid ${
+          cdrError      ? 'rgba(239,68,68,0.5)'
+          : hasAnnotation ? 'color-mix(in srgb, var(--color-accent) 40%, transparent)'
+          : 'var(--color-border)'
+        }`,
+        background: cdrError
+          ? 'rgba(239,68,68,0.10)'
+          : hasAnnotation
+            ? 'color-mix(in srgb, var(--color-accent) 10%, transparent)'
+            : 'transparent',
+        color: cdrError
+          ? 'rgba(239,68,68,0.9)'
+          : hasAnnotation
+            ? 'var(--color-accent)'
+            : 'var(--color-text-secondary)',
+      }}
+    >
+      {cdrRunning ? 'Labelling…' : cdrError ? '⚠ CDR error' : 'Label CDR regions'}
+    </button>
   )
 }
 
@@ -481,6 +532,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
                 onResetView={() => { try { (plugin as any).managers.camera.reset() } catch { /* best effort */ } }}
               />
             </div>
+            <CdrButton chains={seqData.seq} activeFile={activeFile} />
             <InterfaceMenu plugin={plugin} />
             <CompareMenu plugin={plugin} />
           </div>
