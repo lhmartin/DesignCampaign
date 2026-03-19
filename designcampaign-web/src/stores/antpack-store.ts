@@ -75,6 +75,21 @@ interface AntPackStore {
   clearAnnotations(filePath: string): void
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Compute CDR length metrics for a set of chain annotations. */
+function computeCdrMetrics(annotations: ChainCdrAnnotation[]): Record<string, number> {
+  const metrics: Record<string, number> = {}
+  for (const ann of annotations) {
+    const prefix = ann.chainType === 'H' ? 'h' : 'l'
+    for (const n of [1, 2, 3] as const) {
+      const region = `CDR${n}` as CdrRegionName
+      metrics[`cdr_${prefix}${n}_len`] = ann.assignments.filter(a => a === region).length
+    }
+  }
+  return metrics
+}
+
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 export const useAntpackStore = create<AntPackStore>((set, get) => ({
@@ -113,18 +128,8 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
       }))
 
       // Inject CDR length columns into the metrics table.
-      // Heavy chains → cdr_h1_len / cdr_h2_len / cdr_h3_len
-      // Light chains  → cdr_l1_len / cdr_l2_len / cdr_l3_len
-      const cdrMetrics: Record<string, number> = {}
-      for (const ann of chainAnnotations) {
-        const prefix = ann.chainType === 'H' ? 'h' : 'l'
-        for (const n of [1, 2, 3] as const) {
-          const region = `CDR${n}` as const
-          cdrMetrics[`cdr_${prefix}${n}_len`] = ann.assignments.filter(a => a === region).length
-        }
-      }
       const rowName = useMetricsStore.getState().rows.find(r => r.filePath === filePath)?.name ?? filePath
-      useMetricsStore.getState().batchInjectResults([{ filePath, name: rowName, metrics: cdrMetrics }])
+      useMetricsStore.getState().batchInjectResults([{ filePath, name: rowName, metrics: computeCdrMetrics(chainAnnotations) }])
 
       set(s => {
         const next = new Map(s.annotations)
@@ -150,9 +155,12 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
     const rows      = useMetricsStore.getState().rows
     const sequences = useSequenceStore.getState().sequences
 
+    // Build filePath→rowName lookup once (O(M)) to avoid repeated rows.find() later.
+    const rowNameByPath = new Map(rows.filter(r => r.filePath).map(r => [r.filePath!, r.name]))
+
     // Build a flat batch: one entry per chain across all structures.
     // Track which entry belongs to which filePath so we can split results back out.
-    type BatchEntry = { filePath: string; rowName: string; chain: string; sequence: string }
+    type BatchEntry = { filePath: string; name: string; chain: string; sequence: string }
     const batch: BatchEntry[] = []
 
     for (const row of rows) {
@@ -160,21 +168,22 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
       const chainSeqs = sequences.get(row.name)
       if (!chainSeqs?.length) continue
       for (const cs of chainSeqs) {
-        batch.push({ filePath: row.filePath, rowName: row.name, chain: cs.chain, sequence: cs.seq })
+        batch.push({ filePath: row.filePath, name: row.name, chain: cs.chain, sequence: cs.seq })
       }
     }
     if (batch.length === 0) return 0
 
-    const filePaths = [...new Set(batch.map(b => b.filePath))]
+    const filePathSet  = new Set(batch.map(b => b.filePath))
+    const filePaths    = [...filePathSet]
 
     set(s => ({
       running: new Set([...s.running, ...filePaths]),
-      errors:  new Map([...s.errors].filter(([k]) => !filePaths.includes(k))),
+      errors:  new Map([...s.errors].filter(([k]) => !filePathSet.has(k))),
     }))
 
     try {
       const results = await pythonCall<SidecarChainResult[]>('antpack_number', {
-        sequences: batch.map(b => ({ name: b.rowName, chain: b.chain, sequence: b.sequence })),
+        sequences: batch,
         scheme,
       })
 
@@ -194,18 +203,11 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
       }
 
       // Inject CDR length metrics for every structure.
-      const injectBatch = [...annotationsByPath.entries()].map(([fp, anns]) => {
-        const cdrMetrics: Record<string, number> = {}
-        for (const ann of anns) {
-          const prefix = ann.chainType === 'H' ? 'h' : 'l'
-          for (const n of [1, 2, 3] as const) {
-            const region = `CDR${n}` as CdrRegionName
-            cdrMetrics[`cdr_${prefix}${n}_len`] = ann.assignments.filter(a => a === region).length
-          }
-        }
-        const rowName = rows.find(r => r.filePath === fp)?.name ?? fp
-        return { filePath: fp, name: rowName, metrics: cdrMetrics }
-      })
+      const injectBatch = [...annotationsByPath.entries()].map(([fp, anns]) => ({
+        filePath: fp,
+        name:     rowNameByPath.get(fp) ?? fp,
+        metrics:  computeCdrMetrics(anns),
+      }))
       useMetricsStore.getState().batchInjectResults(injectBatch)
 
       set(s => {

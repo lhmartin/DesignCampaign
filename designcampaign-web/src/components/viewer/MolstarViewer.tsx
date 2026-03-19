@@ -112,8 +112,8 @@ function CdrButton({ chains, activeFile, onNeedSetup }: {
   }
 
   // Compute best percent identity across chains for the confidence badge
-  const bestPctId = annotation
-    ? Math.max(...annotation.map(a => a.percentIdentity))
+  const bestPctId = annotation?.length
+    ? annotation.reduce((max, a) => Math.max(max, a.percentIdentity), 0)
     : null
   const conf = bestPctId !== null ? cdrConfidence(bestPctId) : null
 
