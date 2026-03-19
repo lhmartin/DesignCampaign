@@ -30,5 +30,17 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   onMenuRefresh: (callback) => {
     electron.ipcRenderer.on("menu:refresh", callback);
     return () => electron.ipcRenderer.off("menu:refresh", callback);
+  },
+  // Auto-update events — return cleanup functions
+  onUpdateAvailable: (cb) => {
+    electron.ipcRenderer.on("update:available", cb);
+    return () => electron.ipcRenderer.off("update:available", cb);
+  },
+  onUpdateDownloaded: (cb) => {
+    electron.ipcRenderer.on("update:downloaded", cb);
+    return () => electron.ipcRenderer.off("update:downloaded", cb);
+  },
+  installUpdate: () => {
+    electron.ipcRenderer.send("update:install");
   }
 });

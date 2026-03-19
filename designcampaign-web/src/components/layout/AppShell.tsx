@@ -5,6 +5,7 @@ import { FileBrowser } from '@/components/files/FileBrowser'
 import { MolstarViewer, type MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
 import { MetricsTable } from '@/components/metrics/MetricsTable'
 import { ScatterPlot } from '@/components/metrics/ScatterPlot'
+import { CorrelationHeatmap } from '@/components/metrics/CorrelationHeatmap'
 import { SelectionPanel } from '@/components/selection/SelectionPanel'
 import { FilterPanel } from '@/components/filter/FilterPanel'
 import { useFileStore } from '@/stores/file-store'
@@ -139,6 +140,7 @@ export function AppShell() {
                 <TabsTrigger value="files">Files</TabsTrigger>
                 <TabsTrigger value="metrics">Metrics</TabsTrigger>
                 <TabsTrigger value="plot">Plot</TabsTrigger>
+                <TabsTrigger value="corr">Corr</TabsTrigger>
                 <TabsTrigger value="filter">Filter</TabsTrigger>
                 <TabsTrigger value="selection">Selection</TabsTrigger>
               </TabsList>
@@ -153,6 +155,10 @@ export function AppShell() {
 
               <TabsContent value="plot" forceMount>
                 <ScatterPlot viewerRef={viewerRef} />
+              </TabsContent>
+
+              <TabsContent value="corr" forceMount>
+                <CorrelationHeatmap />
               </TabsContent>
 
               <TabsContent value="filter">
