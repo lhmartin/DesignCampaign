@@ -5,6 +5,7 @@
   "productName": "DesignCampaign",
   "copyright": "Copyright © 2025",
   "asar": true,
+  "afterPack": "./scripts/afterpack.mjs",
 
   "publish": [{
     "provider": "github",

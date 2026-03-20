@@ -2,10 +2,14 @@
 /**
  * scripts/prepare-uv.mjs
  * Downloads the uv binary for the current build platform into uv-dist/.
- * On macOS, downloads both x64 and arm64 binaries and merges them with
- * `lipo` to produce a universal binary (required by electron-builder's
- * macOS universal target).
- * Run automatically before electron-builder via npm scripts.
+ *
+ * macOS (universal build):
+ *   Saves two thin binaries — uv-dist/uv-x64 and uv-dist/uv-arm64.
+ *   The afterpack.mjs hook renames the correct one to "uv" inside each
+ *   arch-specific temp bundle so @electron/universal can lipo-merge them.
+ *
+ * Windows / Linux:
+ *   Single-arch download saved directly as uv-dist/uv (or uv.exe).
  */
 import https from 'node:https'
 import { execSync } from 'node:child_process'
@@ -21,22 +25,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const PROJECT_ROOT = join(__dirname, '..')
 const OUT_DIR = join(PROJECT_ROOT, 'uv-dist')
 const IS_WIN = process.platform === 'win32'
-const OUT_BIN = join(OUT_DIR, IS_WIN ? 'uv.exe' : 'uv')
-
-function httpsGetText(url) {
-  return new Promise((resolve, reject) => {
-    function get(u) {
-      https.get(u, { headers: { 'User-Agent': 'designcampaign-build' } }, res => {
-        if (res.statusCode === 301 || res.statusCode === 302) { get(res.headers.location); return }
-        if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode} for ${u}`)); return }
-        let data = ''
-        res.on('data', c => { data += c })
-        res.on('end', () => resolve(data))
-      }).on('error', reject)
-    }
-    get(url)
-  })
-}
+const IS_MAC = process.platform === 'darwin'
 
 async function fetchLatestVersion() {
   // Follow the /releases/latest redirect — the Location header contains the tag.
@@ -72,10 +61,8 @@ function download(url, destPath) {
 }
 
 function findBinary(dir, name) {
-  // Check root first
   const root = join(dir, name)
   if (existsSync(root)) return root
-  // Look one level deeper (archive may have a subdirectory)
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) {
@@ -86,28 +73,65 @@ function findBinary(dir, name) {
   return null
 }
 
-/** Extract a single uv binary from a tar.gz archive into a temp dir. */
-async function extractArchive(url, tag) {
+/** Download a .tar.gz archive and extract the named binary. Returns path + cleanup fn. */
+async function extractTarGz(url, binaryName, tag) {
   const tmpArchive = join(tmpdir(), `uv-download-${tag}.tar.gz`)
   const tmpExtract = join(tmpdir(), `uv-extract-${tag}-${Date.now()}`)
+  const cleanup = () => {
+    rmSync(tmpArchive, { force: true })
+    rmSync(tmpExtract, { recursive: true, force: true })
+  }
   try {
     await download(url, tmpArchive)
     mkdirSync(tmpExtract, { recursive: true })
     execSync(`tar xzf "${tmpArchive}" -C "${tmpExtract}"`)
-    const found = findBinary(tmpExtract, 'uv')
-    if (!found) throw new Error(`Could not locate uv in ${tag} archive`)
-    return { bin: found, cleanup: () => {
-      rmSync(tmpArchive, { force: true })
-      rmSync(tmpExtract, { recursive: true, force: true })
-    }}
+    const found = findBinary(tmpExtract, binaryName)
+    if (!found) throw new Error(`Could not locate ${binaryName} in ${tag} archive`)
+    return { bin: found, cleanup }
   } catch (err) {
-    rmSync(tmpArchive, { force: true })
-    rmSync(tmpExtract, { recursive: true, force: true })
+    cleanup()
     throw err
   }
 }
 
 async function main() {
+  mkdirSync(OUT_DIR, { recursive: true })
+
+  // ── macOS: save two THIN (single-arch) binaries — afterpack.mjs copies the
+  //    correct one into each arch temp bundle before @electron/universal merges.
+  //    Do NOT lipo-merge here: @electron/universal expects thin binaries in each
+  //    half and performs the fat-binary creation itself.
+  if (IS_MAC) {
+    const x64Out   = join(OUT_DIR, 'uv-x64')
+    const arm64Out = join(OUT_DIR, 'uv-arm64')
+
+    if (existsSync(x64Out) && existsSync(arm64Out)) {
+      console.log('[prepare-uv] macOS binaries already present:', OUT_DIR)
+      return
+    }
+
+    console.log('[prepare-uv] Fetching latest uv version...')
+    const version = await fetchLatestVersion()
+    const base = `https://github.com/astral-sh/uv/releases/download/${version}`
+
+    console.log(`[prepare-uv] Downloading uv ${version} for darwin (x64 + arm64)...`)
+    const [x64, arm64] = await Promise.all([
+      extractTarGz(`${base}/uv-x86_64-apple-darwin.tar.gz`,  'uv', 'x64'),
+      extractTarGz(`${base}/uv-aarch64-apple-darwin.tar.gz`, 'uv', 'arm64'),
+    ])
+    try {
+      copyFileSync(x64.bin,   x64Out);  chmodSync(x64Out,   0o755)
+      copyFileSync(arm64.bin, arm64Out); chmodSync(arm64Out, 0o755)
+      console.log('[prepare-uv] Done (macOS thin binaries):', OUT_DIR)
+    } finally {
+      x64.cleanup()
+      arm64.cleanup()
+    }
+    return
+  }
+
+  // ── Windows / Linux: single-arch download.
+  const OUT_BIN = join(OUT_DIR, IS_WIN ? 'uv.exe' : 'uv')
   if (existsSync(OUT_BIN)) {
     console.log('[prepare-uv] Binary already present:', OUT_BIN)
     return
@@ -116,62 +140,36 @@ async function main() {
   console.log('[prepare-uv] Fetching latest uv version...')
   const version = await fetchLatestVersion()
   const base = `https://github.com/astral-sh/uv/releases/download/${version}`
-
-  mkdirSync(OUT_DIR, { recursive: true })
-
-  // ── macOS: build a universal (fat) binary so electron-builder's universal
-  //    target accepts it — a single-arch binary causes a packaging error.
-  if (process.platform === 'darwin') {
-    console.log(`[prepare-uv] Downloading uv ${version} for darwin (universal)...`)
-    const [x64, arm64] = await Promise.all([
-      extractArchive(`${base}/uv-x86_64-apple-darwin.tar.gz`,   'x64'),
-      extractArchive(`${base}/uv-aarch64-apple-darwin.tar.gz`, 'arm64'),
-    ])
-    try {
-      execSync(`lipo -create "${x64.bin}" "${arm64.bin}" -output "${OUT_BIN}"`)
-      chmodSync(OUT_BIN, 0o755)
-      console.log('[prepare-uv] Done (universal):', OUT_BIN)
-    } finally {
-      x64.cleanup()
-      arm64.cleanup()
-    }
-    return
-  }
-
-  // ── Windows / Linux: single-arch download
   console.log(`[prepare-uv] Downloading uv ${version} for ${process.platform}/${process.arch}...`)
 
-  const { url, ext } = (() => {
-    const uvArch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
-    if (IS_WIN) return { url: `${base}/uv-x86_64-pc-windows-msvc.zip`,          ext: '.zip'    }
-    return              { url: `${base}/uv-${uvArch}-unknown-linux-gnu.tar.gz`, ext: '.tar.gz' }
-  })()
-
-  const tmpArchive = join(tmpdir(), `uv-download${ext}`)
-  const tmpExtract = join(tmpdir(), `uv-extract-${Date.now()}`)
-
-  try {
-    await download(url, tmpArchive)
-    console.log('[prepare-uv] Extracting...')
-
-    mkdirSync(tmpExtract, { recursive: true })
-    if (IS_WIN) {
+  if (IS_WIN) {
+    const tmpArchive = join(tmpdir(), 'uv-download.zip')
+    const tmpExtract = join(tmpdir(), `uv-extract-${Date.now()}`)
+    try {
+      await download(`${base}/uv-x86_64-pc-windows-msvc.zip`, tmpArchive)
+      console.log('[prepare-uv] Extracting...')
+      mkdirSync(tmpExtract, { recursive: true })
       execSync(`powershell -NoProfile -Command "Expand-Archive -Path '${tmpArchive}' -DestinationPath '${tmpExtract}' -Force"`)
-    } else {
-      execSync(`tar xzf "${tmpArchive}" -C "${tmpExtract}"`)
+      const found = findBinary(tmpExtract, 'uv.exe')
+      if (!found) throw new Error('Could not locate uv.exe in extracted archive')
+      copyFileSync(found, OUT_BIN)
+      console.log('[prepare-uv] Done:', OUT_BIN)
+    } finally {
+      rmSync(tmpArchive, { force: true })
+      rmSync(tmpExtract, { recursive: true, force: true })
     }
-
-    const binName = IS_WIN ? 'uv.exe' : 'uv'
-    const found = findBinary(tmpExtract, binName)
-    if (!found) throw new Error(`Could not locate ${binName} in extracted archive`)
-
-    copyFileSync(found, OUT_BIN)
-    if (!IS_WIN) chmodSync(OUT_BIN, 0o755)
-
-    console.log('[prepare-uv] Done:', OUT_BIN)
-  } finally {
-    rmSync(tmpArchive, { force: true })
-    rmSync(tmpExtract, { recursive: true, force: true })
+  } else {
+    const uvArch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+    const { bin, cleanup } = await extractTarGz(
+      `${base}/uv-${uvArch}-unknown-linux-gnu.tar.gz`, 'uv', 'linux'
+    )
+    try {
+      copyFileSync(bin, OUT_BIN)
+      chmodSync(OUT_BIN, 0o755)
+      console.log('[prepare-uv] Done:', OUT_BIN)
+    } finally {
+      cleanup()
+    }
   }
 }
 
