@@ -17,7 +17,7 @@ export const BACKBONE_ATOMS = new Set(['N', 'CA', 'C', 'O'])
 export function parseAtoms(
   pdbText: string,
   chains: string[],
-  scope: 'all-heavy' | 'backbone',
+  scope: 'all-heavy' | 'backbone' | 'ca',
 ): AtomRecord[] {
   const chainSet = new Set(chains)
   const records: AtomRecord[] = []
@@ -34,6 +34,8 @@ export function parseAtoms(
     // Skip hydrogens
     const firstChar = atomName[0]
     if (firstChar === 'H' || firstChar === 'D') continue
+    // CA-only filter
+    if (scope === 'ca' && atomName !== 'CA') continue
     // Backbone filter
     if (scope === 'backbone' && !BACKBONE_ATOMS.has(atomName)) continue
 

@@ -61,6 +61,9 @@ export function useMolstar(containerRef: RefObject<HTMLDivElement | null>) {
           import('../themes/rmsd-deviation-theme')
             .then(m => m.registerRmsdDeviationTheme(p))
             .catch(console.warn)
+          import('../themes/named-selection-theme')
+            .then(m => m.registerNamedSelectionTheme(p))
+            .catch(console.warn)
         } else {
           p.dispose()
         }

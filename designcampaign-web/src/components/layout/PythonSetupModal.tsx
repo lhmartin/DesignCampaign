@@ -13,6 +13,37 @@ export function PythonSetupModal({ onComplete, onDismiss }: Props) {
   const [error,    setError]    = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
 
+  // Python setup requires the Electron desktop app.
+  if (!window.electronAPI) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <div style={{
+          width: 400, background: 'var(--color-secondary-bg)',
+          border: '1px solid var(--color-border)', borderRadius: 12,
+          padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 16,
+        }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--color-text-primary)', fontFamily: 'Outfit, sans-serif' }}>
+            Desktop app required
+          </h2>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+            CDR annotation via AntPack requires the DesignCampaign desktop app. Python setup is not available in the browser.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={onDismiss} style={{
+              fontSize: 12, padding: '5px 14px', borderRadius: 6,
+              border: '1px solid var(--color-border)',
+              background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer',
+            }}>Close</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const start = async () => {
     setState('running')
     setError(null)
@@ -30,7 +61,7 @@ export function PythonSetupModal({ onComplete, onDismiss }: Props) {
 
   useEffect(() => {
     start()
-    const cleanup = window.electronAPI.onPythonSetupProgress(msg => {
+    const cleanup = window.electronAPI!.onPythonSetupProgress(msg => {
       setProgress(prev => [...prev, msg])
       // Auto-scroll log to bottom
       requestAnimationFrame(() => {

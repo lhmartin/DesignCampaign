@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { parseCaAtoms, type CaAtom } from '@/lib/metrics/parse-ca-atoms'
 import { useMetricsStore } from '@/stores/metrics-store'
-import type { ProteinMetrics } from '@/stores/metrics-store'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,7 +26,7 @@ interface RmsdStore {
    * Results are injected into the metrics table as the `rmsd` column.
    */
   computeAll(
-    rows: ProteinMetrics[],
+    targets: { name: string; filePath: string }[],
     readFile: (path: string) => Promise<string>,
   ): Promise<void>
 }
@@ -55,7 +54,7 @@ export const useRmsdStore = create<RmsdStore>((set, get) => ({
     useMetricsStore.getState().injectColumn('rmsd', new Map())
   },
 
-  async computeAll(rows, readFile) {
+  async computeAll(targets, readFile) {
     const { referenceAtoms } = get()
     if (!referenceAtoms?.length) return
     set({ running: true, error: null })
@@ -74,8 +73,7 @@ export const useRmsdStore = create<RmsdStore>((set, get) => ({
       const newDeviations  = new Map<string, Map<string, number>>()
       const injectBatch: { filePath: string; name: string; metrics: Record<string, number> }[] = []
 
-      for (const row of rows) {
-        if (!row.filePath) continue
+      for (const row of targets) {
         try {
           const pdbText   = await readFile(row.filePath)
           const mobileAtoms = parseCaAtoms(pdbText)

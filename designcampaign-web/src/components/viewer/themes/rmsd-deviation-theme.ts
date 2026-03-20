@@ -46,28 +46,39 @@ export async function registerRmsdDeviationTheme(
     name:     'rmsd-deviation',
     label:    'RMSD Deviation',
     category: 'Custom',
-    factory: (_ctx: unknown, props: unknown) => ({
-      factory:     provider,
-      granularity: 'group',
-      color: (location: unknown) => {
-        if (!StructureElement.Location.is(location)) return Color(NO_DATA)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const loc = location as any
-        try {
-          const activeFile = useFileStore.getState().activeFile
-          if (!activeFile) return Color(NO_DATA)
-          const devMap = useRmsdStore.getState().deviationsByPath.get(activeFile)
-          if (!devMap) return Color(NO_DATA)
-          const chain  = StructureProperties.chain.auth_asym_id(loc) as string
-          const resNum = StructureProperties.residue.auth_seq_id(loc) as number
-          const dev    = devMap.get(`${chain}:${resNum}`)
-          if (dev === undefined) return Color(NO_DATA)
-          return Color(rmsdHexColor(dev))
-        } catch { return Color(NO_DATA) }
-      },
-      props,
-      description: 'Per-residue Cα RMSD deviation from reference structure after optimal superposition. White=0Å, Orange=1Å, Red≥3Å.',
-    }),
+    factory: (_ctx: unknown, props: unknown) => {
+      // Build label→filePath lookup once per theme application (cheap, avoids per-residue O(N) scan).
+      // The model label is the filename set when the structure was loaded via rawData({ label: fileName }).
+      const files = useFileStore.getState().files
+      const labelToPath = new Map(files.map(f => [f.name, f.path]))
+
+      return {
+        factory:     provider,
+        granularity: 'group',
+        color: (location: unknown) => {
+          if (!StructureElement.Location.is(location)) return Color(NO_DATA)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const loc = location as any
+          try {
+            // Identify which file this residue belongs to via its model label.
+            const modelLabel = (loc.unit?.model?.label ?? '') as string
+            const filePath = labelToPath.get(modelLabel)
+                          ?? useFileStore.getState().activeFile
+                          ?? ''
+            if (!filePath) return Color(NO_DATA)
+            const devMap = useRmsdStore.getState().deviationsByPath.get(filePath)
+            if (!devMap) return Color(NO_DATA)
+            const chain  = StructureProperties.chain.auth_asym_id(loc) as string
+            const resNum = StructureProperties.residue.auth_seq_id(loc) as number
+            const dev    = devMap.get(`${chain}:${resNum}`)
+            if (dev === undefined) return Color(NO_DATA)
+            return Color(rmsdHexColor(dev))
+          } catch { return Color(NO_DATA) }
+        },
+        props,
+        description: 'Per-residue Cα RMSD deviation from reference structure after optimal superposition. White=0Å, Orange=1Å, Red≥3Å.',
+      }
+    },
     getParams:     () => ({}),
     defaultValues: {},
     isApplicable:  () => true,

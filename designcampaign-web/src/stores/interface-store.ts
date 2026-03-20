@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { SelectionKey } from '@/types/selection'
 import { APP_DEFAULTS } from '@/lib/constants/app'
 
-export type AtomScope = 'all-heavy' | 'backbone'
+export type AtomScope = 'ca' | 'all-heavy' | 'backbone'
 
 interface InterfaceStore {
   // ── Params ──────────────────────────────────────────────────────────────────

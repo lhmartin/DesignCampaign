@@ -14,7 +14,9 @@ import { syncToMolstar } from '@/lib/mol-selection-sync'
 import { extractCAPositions, applyStructureTransform } from '@/lib/mol-alignment'
 import { useAntpackStore } from '@/stores/antpack-store'
 import { useRmsdStore } from '@/stores/rmsd-store'
-import { useMetricsStore } from '@/stores/metrics-store'
+import { useSequenceStore } from '@/stores/sequence-store'
+import { useNamedSelectionStore } from '@/stores/named-selection-store'
+import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -55,7 +57,7 @@ function IconLayers({ size = 14 }: { size?: number }) {
 
 function RmsdRefButton({ activeFile }: { activeFile: string | null }) {
   const { referenceFilePath, setReference, clearReference, computeAll, running } = useRmsdStore()
-  const rows = useMetricsStore(s => s.rows)
+  const files = useFileStore(s => s.files)
 
   if (!activeFile) return null
 
@@ -68,10 +70,11 @@ function RmsdRefButton({ activeFile }: { activeFile: string | null }) {
       clearReference()
     } else {
       try {
-        const pdbText = await window.electronAPI?.readFile(activeFile)
+        const pdbText = await readFileContent(activeFile)
         if (!pdbText) return
         setReference(activeFile, pdbText)
-        await computeAll(rows, path => window.electronAPI!.readFile(path))
+        const targets = files.map(f => ({ name: f.name.replace(/\.[^.]+$/, ''), filePath: f.path }))
+        await computeAll(targets, readFileContent)
       } catch { /* ignore */ }
     }
   }
@@ -132,10 +135,11 @@ function CdrButton({ chains, activeFile, onNeedSetup }: {
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    window.electronAPI?.pythonSetupStatus()
+    if (!window.electronAPI) { setEnvReady(false); return }
+    window.electronAPI.pythonSetupStatus()
       .then(({ ready }) => setEnvReady(ready))
       .catch(() => setEnvReady(false))
-    return window.electronAPI?.onPythonSetupComplete(() => setEnvReady(true))
+    return window.electronAPI.onPythonSetupComplete(() => setEnvReady(true))
   }, [])
 
   // Close dropdown on outside click
@@ -196,7 +200,7 @@ function CdrButton({ chains, activeFile, onNeedSetup }: {
   }
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', margin: '0 2px' }}>
+    <div ref={wrapRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', margin: '0 2px', flexShrink: 0 }}>
       {/* ── Main label button ── */}
       <button
         onClick={() => { void annotate(activeFile, chains); setMenuOpen(false) }}
@@ -565,7 +569,8 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
     const containerRef = useRef<HTMLDivElement>(null)
     const { plugin, isLoading, error, setIsLoading } = useMolstar(containerRef)
     const [style, setStyle] = useState<RepresentationStyle>('cartoon')
-    const [colorScheme, setColorScheme] = useState<ColorScheme>('sequence-id')
+    const colorScheme    = useViewerPrefsStore(s => s.colorScheme)
+    const setColorScheme = useViewerPrefsStore(s => s.setColorScheme)
     const [cameraMode, setCameraMode] = useState<'perspective' | 'orthographic'>('perspective')
     const [viewerBg, setViewerBg] = useState<'dark' | 'light'>('dark')
     const [spinning, setSpinning] = useState(false)
@@ -612,9 +617,25 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
       loadAsComparison: async (filePath: string) => {
         if (!plugin) { onError?.('Mol* viewer not initialized'); return }
         await loadComparisonFromFile(plugin, filePath, onError)
+        // applyPreset rebuilds all representations, so re-establish correct colours.
+        // 1. Apply the current colour scheme to ALL structures (restores primary).
+        await applyColorScheme(plugin, colorScheme)
+        // 2. Override each comparison structure with its stored uniform colour.
+        const structures = plugin.managers.structure.hierarchy.current.structures
+        const { entries } = useComparisonStore.getState()
+        for (let i = 0; i < entries.length; i++) {
+          const compIdx = i + 1  // structures[0] is always the primary
+          if (compIdx < structures.length) {
+            await applyToAllRepresentations(
+              plugin,
+              (old: Record<string, unknown>) => ({ ...old, colorTheme: { name: 'uniform', params: { value: entries[i].color } }, alpha: 0.6 }),
+              [structures[compIdx]],
+            )
+          }
+        }
       },
       getPlugin: () => plugin,
-    }), [plugin, onStructureLoaded, onError, setIsLoading, clearSelection])
+    }), [plugin, colorScheme, onStructureLoaded, onError, setIsLoading, clearSelection])
 
     useEffect(() => {
       if (!plugin) return
@@ -626,6 +647,15 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
       applyColorScheme(plugin, colorScheme).catch(console.error)
     }, [plugin, colorScheme])
 
+    // Sync extracted sequences to the shared store so other panels (e.g. UniProt) can read them.
+    useEffect(() => {
+      if (seqData.seq.length === 0 || !activeFile) return
+      useSequenceStore.getState().setSequences(
+        activeFile,
+        seqData.seq.map(c => ({ chain: c.chain, seq: c.residues.map(r => r.code).join('') })),
+      )
+    }, [seqData, activeFile])
+
     // Re-apply RMSD deviation theme whenever new deviations are computed for the active file.
     const activeFileDeviations = useRmsdStore(s => activeFile ? s.deviationsByPath.get(activeFile) : undefined)
     useEffect(() => {
@@ -633,6 +663,31 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
       applyColorScheme(plugin, 'rmsd-deviation').catch(console.error)
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeFileDeviations])
+
+    // Re-apply named-selection theme whenever visible selections change.
+    const visibleNamedSelectionIds = useNamedSelectionStore(s =>
+      s.selections.filter(sel => sel.visible).map(sel => sel.id).join(',')
+    )
+    useEffect(() => {
+      if (!plugin || colorScheme !== 'named-selection') return
+      applyColorScheme(plugin, 'named-selection').catch(console.error)
+    }, [visibleNamedSelectionIds, plugin, colorScheme])
+
+    // Load a file requested externally (e.g. from SelectionPanel search results).
+    const requestedFilePath = useViewerPrefsStore(s => s.requestedFilePath)
+    useEffect(() => {
+      if (!plugin || !requestedFilePath) return
+      // Clear immediately so a second click can queue a new path right away.
+      useViewerPrefsStore.getState().requestLoadFile(null)
+      let cancelled = false
+      useComparisonStore.getState().clearAll()
+      useInterfaceStore.getState().clear()
+      loadStructureFromFile(plugin, requestedFilePath, setIsLoading, onStructureLoaded, onError)
+        .then(() => { if (!cancelled) { setStyle('cartoon'); setColorScheme('sequence-id'); clearSelection() } })
+        .catch(() => {})
+      return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [plugin, requestedFilePath])
 
     useEffect(() => {
       if (!plugin?.canvas3d) return

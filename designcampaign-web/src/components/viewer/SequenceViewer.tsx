@@ -7,6 +7,7 @@ import { syncToMolstar } from '@/lib/mol-selection-sync'
 import { useAntpackStore, CDR_CONFIDENCE_THRESHOLDS } from '@/stores/antpack-store'
 import type { CdrRegionName, CdrConfidenceFilter } from '@/stores/antpack-store'
 import { useRmsdStore } from '@/stores/rmsd-store'
+import { useNamedSelectionStore } from '@/stores/named-selection-store'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -245,6 +246,15 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
   const setCdrConfidenceFilter = useAntpackStore(s => s.setCdrConfidenceFilter)
   const rmsdDeviations         = useRmsdStore(s => structurePath ? s.deviationsByPath.get(structurePath) : undefined)
   const hasRmsd                = !!rmsdDeviations
+  const allNamedSelections     = useNamedSelectionStore(s => s.selections)
+  const namedSelColorMap       = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const sel of allNamedSelections) {
+      if (!sel.visible) continue
+      for (const key of sel.residues) map.set(key, sel.color)
+    }
+    return map
+  }, [allNamedSelections])
 
   const [colorMode, setColorMode]       = useState<ColorMode>('chemical')
   const [hoveredKey, setHoveredKey]     = useState<string | null>(null)
@@ -597,11 +607,18 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
 
                     const { bg: modeBg, fg: modeFg } = cellColors(res.code, key, row.chain.chain, resIdx)
                     const dimBg  = `color-mix(in srgb, ${modeBg} 65%, transparent)`
-                    const cellBg = isActive
+                    const namedSelColor = !isActive ? namedSelColorMap.get(key) : undefined
+                    const namedSelHex   = namedSelColor !== undefined
+                      ? `#${namedSelColor.toString(16).padStart(6, '0')}`
+                      : undefined
+                    const rawBg  = isActive
                       ? 'var(--color-accent)'
                       : isHovered
                         ? `color-mix(in srgb, var(--color-accent) 28%, ${modeBg})`
                         : dimBg
+                    const cellBg = !isActive && namedSelHex
+                      ? `color-mix(in srgb, ${namedSelHex} 22%, ${rawBg})`
+                      : rawBg
                     const cellFg = isActive ? '#0a0e1a' : modeFg
 
                     return (
@@ -631,7 +648,9 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
                               : 'none',
                             borderBottom: isSelected
                               ? '2px solid color-mix(in srgb, var(--color-accent) 80%, #fff)'
-                              : '2px solid transparent',
+                              : namedSelHex
+                                ? `2px solid ${namedSelHex}`
+                                : '2px solid transparent',
                           }}
                         >
                           {res.code}
