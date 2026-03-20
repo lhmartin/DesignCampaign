@@ -8,7 +8,7 @@ import https from 'node:https'
 import { execSync } from 'node:child_process'
 import {
   mkdirSync, existsSync, createWriteStream, rmSync,
-  readdirSync, renameSync, chmodSync, statSync,
+  readdirSync, copyFileSync, chmodSync, statSync,
 } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -43,14 +43,10 @@ async function fetchLatestVersion() {
 function getAsset(version) {
   const base = `https://github.com/astral-sh/uv/releases/download/${version}`
   const { platform, arch } = process
-  if (platform === 'win32') {
-    return { url: `${base}/uv-x86_64-pc-windows-msvc.zip`, ext: '.zip' }
-  }
-  if (platform === 'darwin') {
-    return { url: `${base}/uv-universal-apple-darwin.tar.gz`, ext: '.tar.gz' }
-  }
   const uvArch = arch === 'arm64' ? 'aarch64' : 'x86_64'
-  return { url: `${base}/uv-${uvArch}-unknown-linux-gnu.tar.gz`, ext: '.tar.gz' }
+  if (platform === 'win32')   return { url: `${base}/uv-x86_64-pc-windows-msvc.zip`,          ext: '.zip'    }
+  if (platform === 'darwin')  return { url: `${base}/uv-${uvArch}-apple-darwin.tar.gz`,        ext: '.tar.gz' }
+  return                               { url: `${base}/uv-${uvArch}-unknown-linux-gnu.tar.gz`, ext: '.tar.gz' }
 }
 
 function download(url, destPath) {
@@ -114,7 +110,7 @@ async function main() {
     if (!found) throw new Error(`Could not locate ${binName} in extracted archive`)
 
     mkdirSync(OUT_DIR, { recursive: true })
-    renameSync(found, OUT_BIN)
+    copyFileSync(found, OUT_BIN)
     if (!IS_WIN) chmodSync(OUT_BIN, 0o755)
 
     console.log('[prepare-uv] Done:', OUT_BIN)
