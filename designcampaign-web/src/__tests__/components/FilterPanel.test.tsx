@@ -84,23 +84,31 @@ describe('FilterPanel', () => {
   it('ranking mode toggle buttons update store', async () => {
     const user = userEvent.setup()
     render(<FilterPanel />)
+    // Ranking section starts collapsed — open it first
+    await user.click(screen.getByRole('button', { name: /ranking/i }))
     await user.click(screen.getByText('Rank sum'))
     expect(useFilterStore.getState().rankingMode).toBe('borda')
   })
 
-  it('shows "Calculate or import metrics first" when no ranking metrics available', () => {
+  it('shows "Calculate or import metrics first" when no ranking metrics available', async () => {
     // Set allColumns to [] so syncRankingMetrics (called from useEffect) adds nothing
     useMetricsStore.setState({ allColumns: [] })
+    const user = userEvent.setup()
     render(<FilterPanel />)
+    // Ranking section starts collapsed — open it first
+    await user.click(screen.getByRole('button', { name: /ranking/i }))
     expect(screen.getByText('Calculate or import metrics first.')).toBeInTheDocument()
   })
 
-  it('"Apply Ranking" button is disabled when no metrics are active', () => {
+  it('"Apply Ranking" button is disabled when rows are empty', () => {
+    // Button only renders when at least one metric is active — no rows → disabled
     useMetricsStore.getState().importCSV('name,score\np1,80')
     useFilterStore.getState().syncRankingMetrics(['score'])
+    useFilterStore.getState().updateRankingMetric('score', { active: true })
+    // Clear rows so the button is rendered but disabled
+    useMetricsStore.setState({ rows: [] })
     render(<FilterPanel />)
     const applyBtn = screen.getByRole('button', { name: /Apply Ranking/i })
-    // No active metrics → disabled
     expect(applyBtn).toBeDisabled()
   })
 
