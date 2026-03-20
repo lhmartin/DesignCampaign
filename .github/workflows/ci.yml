@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: designcampaign-web/package-lock.json
+
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: designcampaign-web
+
+      - name: Build Windows
+        run: npm run typecheck && npm run prepare:uv && npm run build:vite && electron-builder --win --publish never
+        working-directory: designcampaign-web
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: designcampaign-web/package-lock.json
+
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: designcampaign-web
+
+      - name: Build macOS
+        run: npm run typecheck && npm run prepare:uv && npm run build:vite && electron-builder --mac --publish never
+        working-directory: designcampaign-web
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: designcampaign-web/package-lock.json
+
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: designcampaign-web
+
+      - name: Build Linux
+        run: npm run typecheck && npm run prepare:uv && npm run build:vite && electron-builder --linux --publish never
+        working-directory: designcampaign-web
