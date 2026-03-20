@@ -1,17 +1,21 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Box, Square, Sun, Moon, RotateCw, Layers, Home } from 'lucide-react'
+import { Box, Square, Sun, Moon, RotateCw, Home } from 'lucide-react'
 import { useSelectionStore } from '@/stores/selection-store'
+import { PRESETS, type PresetId } from './presets'
 
-export type RepresentationStyle = 'cartoon' | 'ball-and-stick' | 'spacefill' | 'line' | 'gaussian-surface'
+export type RepresentationStyle = 'cartoon' | 'ball-and-stick' | 'spacefill' | 'line' | 'gaussian-surface' | 'putty' | 'backbone' | 'molecular-surface'
 export type ColorScheme = 'sequence-id' | 'chain-id' | 'secondary-structure' | 'plddt-bands' | 'hydrophobicity' | 'element-symbol' | 'rmsd-deviation' | 'named-selection'
 
 const STYLE_OPTIONS: { value: RepresentationStyle; label: string }[] = [
-  { value: 'cartoon',          label: 'Cartoon' },
-  { value: 'ball-and-stick',   label: 'Ball & Stick' },
-  { value: 'spacefill',        label: 'Spacefill' },
-  { value: 'line',             label: 'Wireframe' },
-  { value: 'gaussian-surface', label: 'Surface' },
+  { value: 'cartoon',           label: 'Cartoon' },
+  { value: 'ball-and-stick',    label: 'Ball & Stick' },
+  { value: 'spacefill',         label: 'Spacefill' },
+  { value: 'line',              label: 'Wireframe' },
+  { value: 'gaussian-surface',  label: 'Surface' },
+  { value: 'putty',             label: 'Putty (B-factor)' },
+  { value: 'backbone',          label: 'Backbone' },
+  { value: 'molecular-surface', label: 'Mol. Surface' },
 ]
 
 const COLOR_OPTIONS: { value: ColorScheme; label: string }[] = [
@@ -150,25 +154,30 @@ function SelectionBadge() {
 export interface ViewerControlsProps {
   style: RepresentationStyle
   colorScheme: ColorScheme
+  activePreset: PresetId | ''
   onStyleChange: (v: RepresentationStyle) => void
   onColorChange: (v: ColorScheme) => void
+  onPresetChange: (id: PresetId | '') => void
   cameraMode: 'perspective' | 'orthographic'
   viewerBg: 'dark' | 'light'
   spinning: boolean
   spinSpeed: number
-  showAO: boolean
   onCameraModeChange: (v: 'perspective' | 'orthographic') => void
   onViewerBgChange: (v: 'dark' | 'light') => void
   onSpinChange: (v: boolean) => void
   onSpinSpeedChange: (v: number) => void
-  onAOChange: (v: boolean) => void
   onResetView: () => void
 }
 
+const PRESET_OPTIONS = [
+  { value: '' as PresetId | '', label: 'Preset…' },
+  ...PRESETS.map(p => ({ value: p.id as PresetId | '', label: p.label })),
+]
+
 export function ViewerControls({
-  style, colorScheme, onStyleChange, onColorChange,
-  cameraMode, viewerBg, spinning, spinSpeed, showAO,
-  onCameraModeChange, onViewerBgChange, onSpinChange, onSpinSpeedChange, onAOChange,
+  style, colorScheme, activePreset, onStyleChange, onColorChange, onPresetChange,
+  cameraMode, viewerBg, spinning, spinSpeed,
+  onCameraModeChange, onViewerBgChange, onSpinChange, onSpinSpeedChange,
   onResetView,
 }: ViewerControlsProps) {
   return (
@@ -185,8 +194,13 @@ export function ViewerControls({
       overflowY: 'hidden',
     }}>
 
+      {/* Preset */}
+      <Sel value={activePreset} options={PRESET_OPTIONS} onChange={v => onPresetChange(v as PresetId | '')} width={150} />
+
+      <Divider />
+
       {/* Representation style */}
-      <Sel value={style} options={STYLE_OPTIONS} onChange={onStyleChange} width={108} />
+      <Sel value={style} options={STYLE_OPTIONS} onChange={onStyleChange} width={130} />
 
       <Divider />
 
@@ -247,15 +261,6 @@ export function ViewerControls({
           </span>
         </div>
       )}
-
-      {/* Ambient occlusion */}
-      <IBtn
-        active={showAO}
-        onClick={() => onAOChange(!showAO)}
-        title={showAO ? 'Disable Ambient Occlusion' : 'Enable Ambient Occlusion'}
-      >
-        <Layers size={13} strokeWidth={1.75} />
-      </IBtn>
 
       {/* Reset view */}
       <IBtn active={false} onClick={onResetView} title="Reset Camera">

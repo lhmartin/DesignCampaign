@@ -21,7 +21,7 @@ interface ViewerPrefsStore {
 }
 
 export const useViewerPrefsStore = create<ViewerPrefsStore>((set) => ({
-  colorScheme:       'sequence-id',
+  colorScheme:       'chain-id',
   requestedFilePath: null,
 
   setColorScheme:  (s)    => set({ colorScheme: s }),
