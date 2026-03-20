@@ -2,6 +2,9 @@
 /**
  * scripts/prepare-uv.mjs
  * Downloads the uv binary for the current build platform into uv-dist/.
+ * On macOS, downloads both x64 and arm64 binaries and merges them with
+ * `lipo` to produce a universal binary (required by electron-builder's
+ * macOS universal target).
  * Run automatically before electron-builder via npm scripts.
  */
 import https from 'node:https'
@@ -40,15 +43,6 @@ async function fetchLatestVersion() {
   return JSON.parse(json).tag_name
 }
 
-function getAsset(version) {
-  const base = `https://github.com/astral-sh/uv/releases/download/${version}`
-  const { platform, arch } = process
-  const uvArch = arch === 'arm64' ? 'aarch64' : 'x86_64'
-  if (platform === 'win32')   return { url: `${base}/uv-x86_64-pc-windows-msvc.zip`,          ext: '.zip'    }
-  if (platform === 'darwin')  return { url: `${base}/uv-${uvArch}-apple-darwin.tar.gz`,        ext: '.tar.gz' }
-  return                               { url: `${base}/uv-${uvArch}-unknown-linux-gnu.tar.gz`, ext: '.tar.gz' }
-}
-
 function download(url, destPath) {
   return new Promise((resolve, reject) => {
     function get(u) {
@@ -80,17 +74,67 @@ function findBinary(dir, name) {
   return null
 }
 
+/** Extract a single uv binary from a tar.gz archive into a temp dir. */
+async function extractArchive(url, tag) {
+  const tmpArchive = join(tmpdir(), `uv-download-${tag}.tar.gz`)
+  const tmpExtract = join(tmpdir(), `uv-extract-${tag}-${Date.now()}`)
+  try {
+    await download(url, tmpArchive)
+    mkdirSync(tmpExtract, { recursive: true })
+    execSync(`tar xzf "${tmpArchive}" -C "${tmpExtract}"`)
+    const found = findBinary(tmpExtract, 'uv')
+    if (!found) throw new Error(`Could not locate uv in ${tag} archive`)
+    return { bin: found, cleanup: () => {
+      rmSync(tmpArchive, { force: true })
+      rmSync(tmpExtract, { recursive: true, force: true })
+    }}
+  } catch (err) {
+    rmSync(tmpArchive, { force: true })
+    rmSync(tmpExtract, { recursive: true, force: true })
+    throw err
+  }
+}
+
 async function main() {
   if (existsSync(OUT_BIN)) {
     console.log('[prepare-uv] Binary already present:', OUT_BIN)
     return
   }
 
-  console.log(`[prepare-uv] Fetching latest uv version...`)
+  console.log('[prepare-uv] Fetching latest uv version...')
   const version = await fetchLatestVersion()
+  const base = `https://github.com/astral-sh/uv/releases/download/${version}`
+
+  mkdirSync(OUT_DIR, { recursive: true })
+
+  // ── macOS: build a universal (fat) binary so electron-builder's universal
+  //    target accepts it — a single-arch binary causes a packaging error.
+  if (process.platform === 'darwin') {
+    console.log(`[prepare-uv] Downloading uv ${version} for darwin (universal)...`)
+    const [x64, arm64] = await Promise.all([
+      extractArchive(`${base}/uv-x86_64-apple-darwin.tar.gz`,   'x64'),
+      extractArchive(`${base}/uv-aarch64-apple-darwin.tar.gz`, 'arm64'),
+    ])
+    try {
+      execSync(`lipo -create "${x64.bin}" "${arm64.bin}" -output "${OUT_BIN}"`)
+      chmodSync(OUT_BIN, 0o755)
+      console.log('[prepare-uv] Done (universal):', OUT_BIN)
+    } finally {
+      x64.cleanup()
+      arm64.cleanup()
+    }
+    return
+  }
+
+  // ── Windows / Linux: single-arch download
   console.log(`[prepare-uv] Downloading uv ${version} for ${process.platform}/${process.arch}...`)
 
-  const { url, ext } = getAsset(version)
+  const { url, ext } = (() => {
+    const uvArch = process.arch === 'arm64' ? 'aarch64' : 'x86_64'
+    if (IS_WIN) return { url: `${base}/uv-x86_64-pc-windows-msvc.zip`,          ext: '.zip'    }
+    return              { url: `${base}/uv-${uvArch}-unknown-linux-gnu.tar.gz`, ext: '.tar.gz' }
+  })()
+
   const tmpArchive = join(tmpdir(), `uv-download${ext}`)
   const tmpExtract = join(tmpdir(), `uv-extract-${Date.now()}`)
 
@@ -109,14 +153,13 @@ async function main() {
     const found = findBinary(tmpExtract, binName)
     if (!found) throw new Error(`Could not locate ${binName} in extracted archive`)
 
-    mkdirSync(OUT_DIR, { recursive: true })
     copyFileSync(found, OUT_BIN)
     if (!IS_WIN) chmodSync(OUT_BIN, 0o755)
 
     console.log('[prepare-uv] Done:', OUT_BIN)
   } finally {
-    if (existsSync(tmpArchive)) rmSync(tmpArchive, { force: true })
-    if (existsSync(tmpExtract)) rmSync(tmpExtract, { recursive: true, force: true })
+    rmSync(tmpArchive, { force: true })
+    rmSync(tmpExtract, { recursive: true, force: true })
   }
 }
 
