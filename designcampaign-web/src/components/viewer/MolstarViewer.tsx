@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useMolstar } from './hooks/useMolstar'
 import { ViewerControls, type RepresentationStyle, type ColorScheme } from './ViewerControls'
+import { PRESETS, type PresetId } from './presets'
 import { SequenceViewer } from './SequenceViewer'
 import { InterfaceMenu } from './InterfaceMenu'
 import { useSelectionStore } from '@/stores/selection-store'
@@ -21,11 +22,14 @@ import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
 const STYLE_MAP: Record<RepresentationStyle, string> = {
-  cartoon: 'cartoon',
-  'ball-and-stick': 'ball-and-stick',
-  spacefill: 'spacefill',
-  line: 'line',
+  cartoon:            'cartoon',
+  'ball-and-stick':   'ball-and-stick',
+  spacefill:          'spacefill',
+  line:               'line',
   'gaussian-surface': 'gaussian-surface',
+  putty:              'putty',
+  backbone:           'backbone',
+  'molecular-surface':'molecular-surface',
 }
 
 export interface MolstarViewerHandle {
@@ -575,7 +579,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
     const [viewerBg, setViewerBg] = useState<'dark' | 'light'>('dark')
     const [spinning, setSpinning] = useState(false)
     const [spinSpeed, setSpinSpeed] = useState(0.2) // 1 rotation every 5s
-    const [showAO, setShowAO] = useState(false)
+    const [activePreset, setActivePreset] = useState<PresetId | ''>('')
     const [seqData, setSeqData] = useState<{ seq: ChainSequence[]; values: Map<string, number> }>(
       { seq: [], values: new Map() }
     )
@@ -611,7 +615,8 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
         useInterfaceStore.getState().clear()
         await loadStructureFromFile(plugin, filePath, setIsLoading, onStructureLoaded, onError)
         setStyle('cartoon')
-        setColorScheme('sequence-id')
+        setColorScheme('chain-id')
+        setActivePreset('')
         clearSelection()
       },
       loadAsComparison: async (filePath: string) => {
@@ -683,7 +688,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
       useComparisonStore.getState().clearAll()
       useInterfaceStore.getState().clear()
       loadStructureFromFile(plugin, requestedFilePath, setIsLoading, onStructureLoaded, onError)
-        .then(() => { if (!cancelled) { setStyle('cartoon'); setColorScheme('sequence-id'); clearSelection() } })
+        .then(() => { if (!cancelled) { setStyle('cartoon'); setColorScheme('chain-id'); setActivePreset(''); clearSelection() } })
         .catch(() => {})
       return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -714,17 +719,17 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
     }, [plugin, spinning, spinSpeed])
 
     useEffect(() => {
-      if (!plugin?.canvas3d) return
-      try {
-        (plugin.canvas3d as any).setProps({
-          postprocessing: {
-            occlusion: showAO
-              ? { name: 'on', params: { bias: 0.8, blurKernelSize: 15, radius: 5, samples: 32, resolutionScale: 1 } }
-              : { name: 'off', params: {} },
-          },
-        })
-      } catch { /* best effort */ }
-    }, [plugin, showAO])
+      if (!plugin || !activePreset) return
+      const preset = PRESETS.find(p => p.id === activePreset)
+      if (!preset) return
+      if (preset.kind === 'ghost') {
+        applyGhostPreset(plugin).catch(console.error)
+      } else {
+        setStyle(preset.style)
+        setColorScheme(preset.colorScheme)
+      }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [plugin, activePreset])
 
     useEffect(() => {
       if (!plugin) return
@@ -767,19 +772,19 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
               <ViewerControls
                 style={style}
                 colorScheme={colorScheme}
+                activePreset={activePreset}
                 cameraMode={cameraMode}
                 viewerBg={viewerBg}
                 spinning={spinning}
                 spinSpeed={spinSpeed}
-                showAO={showAO}
-                onStyleChange={setStyle}
-                onColorChange={setColorScheme}
+                onStyleChange={v => { setStyle(v); setActivePreset('') }}
+                onColorChange={v => { setColorScheme(v); setActivePreset('') }}
+                onPresetChange={setActivePreset}
                 onCameraModeChange={setCameraMode}
                 onViewerBgChange={setViewerBg}
                 onSpinChange={setSpinning}
                 onSpinSpeedChange={setSpinSpeed}
-                onAOChange={setShowAO}
-                onResetView={() => { try { (plugin as any).managers.camera.reset() } catch { /* best effort */ } }}
+                onResetView={() => { try { plugin.canvas3d?.requestCameraReset() } catch { /* best effort */ } }}
               />
             </div>
             <RmsdRefButton activeFile={activeFile} />
@@ -1010,4 +1015,34 @@ async function applyStyle(plugin: PluginUIContext, style: RepresentationStyle): 
 
 async function applyColorScheme(plugin: PluginUIContext, scheme: ColorScheme): Promise<void> {
   await applyToAllRepresentations(plugin, (old: Record<string, unknown>) => ({ ...old, colorTheme: { name: scheme, params: {} } }))
+}
+
+/** Ghost preset: sets existing reps to cartoon/chain, then adds a transparent gaussian-surface layer. */
+async function applyGhostPreset(plugin: PluginUIContext): Promise<void> {
+  const { StateTransforms } = await import('molstar/lib/mol-plugin-state/transforms')
+  const structures = plugin.managers.structure.hierarchy.current.structures
+  if (structures.length === 0) return
+  const update = plugin.state.data.build()
+  for (const structureRef of structures) {
+    for (const component of (structureRef as any).components ?? []) {
+      // Update existing representations → cartoon + chain-id
+      for (const repr of (component as any).representations ?? []) {
+        update.to((repr as any).cell).update((old: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+          ...old,
+          type:       { name: 'cartoon', params: {} },
+          colorTheme: { name: 'chain-id', params: {} },
+        }))
+      }
+      // Add transparent gaussian-surface layer on top
+      update.to((component as any).cell).apply(
+        StateTransforms.Representation.StructureRepresentation3D,
+        {
+          type:       { name: 'gaussian-surface', params: { alpha: 0.25 } },
+          colorTheme: { name: 'chain-id', params: {} },
+          sizeTheme:  { name: 'uniform', params: { value: 1 } },
+        } as any // eslint-disable-line @typescript-eslint/no-explicit-any
+      )
+    }
+  }
+  try { await plugin.runTask(plugin.state.data.updateTree(update)) } catch { /* best effort */ }
 }
