@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react'
+import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useMolstar } from './hooks/useMolstar'
 import { ViewerControls, type RepresentationStyle, type ColorScheme } from './ViewerControls'
 import { PRESETS, type PresetId } from './presets'
@@ -586,6 +586,15 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
     const activeFile = useFileStore(s => s.activeFile)
     const { toggleResidue, addResidue, clearSelection, selectedResidues } = useSelectionStore()
 
+    // Resets viewer UI state after a new structure is loaded.
+    // All setters are stable (useState/zustand), so no deps needed.
+    const resetViewerState = useCallback(() => {
+      setStyle('cartoon')
+      setColorScheme('chain-id')
+      setActivePreset('')
+      clearSelection()
+    }, [clearSelection]) // eslint-disable-line react-hooks/exhaustive-deps
+
     // Sync selection store → 3D viewer so external selectAll() calls (InterfaceGroup, etc.) highlight in Mol*.
     // SequenceViewer handles its own click-driven sync; this handles all other sources.
     useEffect(() => {
@@ -614,10 +623,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
         useComparisonStore.getState().clearAll()
         useInterfaceStore.getState().clear()
         await loadStructureFromFile(plugin, filePath, setIsLoading, onStructureLoaded, onError)
-        setStyle('cartoon')
-        setColorScheme('chain-id')
-        setActivePreset('')
-        clearSelection()
+        resetViewerState()
       },
       loadAsComparison: async (filePath: string) => {
         if (!plugin) { onError?.('Mol* viewer not initialized'); return }
@@ -640,7 +646,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
         }
       },
       getPlugin: () => plugin,
-    }), [plugin, colorScheme, onStructureLoaded, onError, setIsLoading, clearSelection])
+    }), [plugin, colorScheme, onStructureLoaded, onError, setIsLoading, resetViewerState])
 
     useEffect(() => {
       if (!plugin) return
@@ -688,7 +694,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
       useComparisonStore.getState().clearAll()
       useInterfaceStore.getState().clear()
       loadStructureFromFile(plugin, requestedFilePath, setIsLoading, onStructureLoaded, onError)
-        .then(() => { if (!cancelled) { setStyle('cartoon'); setColorScheme('chain-id'); setActivePreset(''); clearSelection() } })
+        .then(() => { if (!cancelled) resetViewerState() })
         .catch(() => {})
       return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1017,24 +1023,32 @@ async function applyColorScheme(plugin: PluginUIContext, scheme: ColorScheme): P
   await applyToAllRepresentations(plugin, (old: Record<string, unknown>) => ({ ...old, colorTheme: { name: scheme, params: {} } }))
 }
 
+// Lazy singleton — loaded once on first ghost-preset activation to avoid repeated dynamic imports.
+let _StateTransforms: (typeof import('molstar/lib/mol-plugin-state/transforms'))['StateTransforms'] | null = null
+async function getStateTransforms() {
+  if (!_StateTransforms) {
+    _StateTransforms = (await import('molstar/lib/mol-plugin-state/transforms')).StateTransforms
+  }
+  return _StateTransforms
+}
+
 /** Ghost preset: sets existing reps to cartoon/chain, then adds a transparent gaussian-surface layer. */
 async function applyGhostPreset(plugin: PluginUIContext): Promise<void> {
-  const { StateTransforms } = await import('molstar/lib/mol-plugin-state/transforms')
+  // First pass: update all existing reps → cartoon + chain-id (reuses shared traversal).
+  await applyToAllRepresentations(plugin, (old: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+    ...old,
+    type:       { name: 'cartoon', params: {} },
+    colorTheme: { name: 'chain-id', params: {} },
+  }))
+
+  // Second pass: add a transparent gaussian-surface layer to each component.
+  const StateTransforms = await getStateTransforms()
   const structures = plugin.managers.structure.hierarchy.current.structures
   if (structures.length === 0) return
   const update = plugin.state.data.build()
   for (const structureRef of structures) {
-    for (const component of (structureRef as any).components ?? []) {
-      // Update existing representations → cartoon + chain-id
-      for (const repr of (component as any).representations ?? []) {
-        update.to((repr as any).cell).update((old: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
-          ...old,
-          type:       { name: 'cartoon', params: {} },
-          colorTheme: { name: 'chain-id', params: {} },
-        }))
-      }
-      // Add transparent gaussian-surface layer on top
-      update.to((component as any).cell).apply(
+    for (const component of (structureRef as any).components ?? []) { // eslint-disable-line @typescript-eslint/no-explicit-any
+      update.to((component as any).cell).apply( // eslint-disable-line @typescript-eslint/no-explicit-any
         StateTransforms.Representation.StructureRepresentation3D,
         {
           type:       { name: 'gaussian-surface', params: { alpha: 0.25 } },
