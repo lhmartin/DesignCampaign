@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { FolderOpen, Table2, ScatterChart, Grid2x2, GitMerge, SlidersHorizontal, MousePointer2, Database, Sun, Moon } from 'lucide-react'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { FileBrowser } from '@/components/files/FileBrowser'
@@ -18,9 +19,9 @@ import { PythonSetupModal } from './PythonSetupModal'
 const cardStyle: React.CSSProperties = {
   width: '100%',
   height: '100%',
-  borderRadius: 10,
+  borderRadius: 8,
   border: '1px solid var(--color-border)',
-  boxShadow: '0 2px 8px rgba(0,0,0,0.12), 0 4px 20px rgba(0,0,0,0.08)',
+  boxShadow: 'var(--shadow-card)',
   overflow: 'hidden',
   display: 'flex',
   flexDirection: 'column',
@@ -110,10 +111,13 @@ export function AppShell() {
             border: '1px solid var(--color-border)',
             background: 'transparent',
             cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
           }}
           title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
         >
-          {isDark ? '☀ Light' : '☾ Dark'}
+          {isDark ? <><Sun size={11} />Light</> : <><Moon size={11} />Dark</>}
         </button>
       </div>
 
@@ -147,14 +151,15 @@ export function AppShell() {
               style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
             >
               <TabsList>
-                <TabsTrigger value="files">Files</TabsTrigger>
-                <TabsTrigger value="metrics">Metrics</TabsTrigger>
-                <TabsTrigger value="plot">Plot</TabsTrigger>
-                <TabsTrigger value="corr">Corr</TabsTrigger>
-                <TabsTrigger value="alignment">Align</TabsTrigger>
-                <TabsTrigger value="filter">Filter</TabsTrigger>
-                <TabsTrigger value="selection">Selection</TabsTrigger>
-                <TabsTrigger value="uniprot">UniProt</TabsTrigger>
+                <TabsTrigger value="files"><FolderOpen size={12} strokeWidth={1.75} />Files</TabsTrigger>
+                <TabsTrigger value="metrics"><Table2 size={12} strokeWidth={1.75} />Metrics</TabsTrigger>
+                <TabsTrigger value="plot"><ScatterChart size={12} strokeWidth={1.75} />Plot</TabsTrigger>
+                <TabsTrigger value="corr"><Grid2x2 size={12} strokeWidth={1.75} />Corr</TabsTrigger>
+                <TabsTrigger value="alignment"><GitMerge size={12} strokeWidth={1.75} />Align</TabsTrigger>
+                <TabsTrigger value="filter"><SlidersHorizontal size={12} strokeWidth={1.75} />Filter</TabsTrigger>
+                <span style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px', flexShrink: 0 }} />
+                <TabsTrigger value="selection"><MousePointer2 size={12} strokeWidth={1.75} />Selection</TabsTrigger>
+                <TabsTrigger value="uniprot"><Database size={12} strokeWidth={1.75} />UniProt</TabsTrigger>
               </TabsList>
 
               <TabsContent value="files">

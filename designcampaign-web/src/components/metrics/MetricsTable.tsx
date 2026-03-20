@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { ChevronUp, ChevronDown } from 'lucide-react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -168,12 +169,12 @@ function ColumnsDropdown({
           zIndex: 200,
           background: 'var(--color-secondary-bg)',
           border: '1px solid var(--color-border)',
-          borderRadius: 6,
+          borderRadius: 8,
           padding: '6px 0 4px',
           minWidth: 200,
           maxHeight: 320,
           overflowY: 'auto',
-          boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
+          boxShadow: 'var(--shadow-popover)',
         }}>
           {/* Show all / Hide all */}
           <div style={{
@@ -443,7 +444,7 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
 
       {/* Progress bars */}
       {isCalculating && (
-        <div className="h-0.5 bg-[var(--color-border)] shrink-0">
+        <div className="h-[3px] bg-[var(--color-border)] shrink-0">
           <div className="h-full bg-[var(--color-accent)] transition-all" style={{ width: `${progress * 100}%` }} />
         </div>
       )}
@@ -475,8 +476,8 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
                     >
                       <span className="flex items-center gap-1">
                         {flexRender(header.column.columnDef.header, header.getContext())}
-                        {header.column.getIsSorted() === 'asc' && ' ↑'}
-                        {header.column.getIsSorted() === 'desc' && ' ↓'}
+                        {header.column.getIsSorted() === 'asc' && <ChevronUp size={11} strokeWidth={1.75} />}
+                        {header.column.getIsSorted() === 'desc' && <ChevronDown size={11} strokeWidth={1.75} />}
                       </span>
                     </th>
                   ))}

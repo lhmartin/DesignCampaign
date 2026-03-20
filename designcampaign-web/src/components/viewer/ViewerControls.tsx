@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { Box, Square, Sun, Moon, RotateCw, Layers, Home } from 'lucide-react'
 import { useSelectionStore } from '@/stores/selection-store'
 
 export type RepresentationStyle = 'cartoon' | 'ball-and-stick' | 'spacefill' | 'line' | 'gaussian-surface'
@@ -23,88 +24,6 @@ const COLOR_OPTIONS: { value: ColorScheme; label: string }[] = [
   { value: 'rmsd-deviation',      label: 'RMSD Deviation' },
   { value: 'named-selection',     label: 'Named Selections' },
 ]
-
-// ─── Inline SVG icons ─────────────────────────────────────────────────────────
-
-function IconOrtho({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
-      <rect x="1" y="4" width="8" height="8" rx="0.5" stroke="currentColor" strokeWidth="1.2"/>
-      <rect x="5" y="1" width="8" height="8" rx="0.5" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2 1"/>
-      <line x1="1" y1="4" x2="5" y2="1" stroke="currentColor" strokeWidth="1.2"/>
-      <line x1="9" y1="4" x2="13" y2="1" stroke="currentColor" strokeWidth="1.2"/>
-      <line x1="1" y1="12" x2="5" y2="9" stroke="currentColor" strokeWidth="1.2"/>
-      <line x1="9" y1="12" x2="13" y2="9" stroke="currentColor" strokeWidth="1.2"/>
-    </svg>
-  )
-}
-
-function IconPerspective({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
-      <polygon points="2,12 12,12 10,4 4,4" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-      <polygon points="5,4 9,4 8,1 6,1" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-      <line x1="2" y1="12" x2="5" y2="4" stroke="currentColor" strokeWidth="1"/>
-      <line x1="12" y1="12" x2="9" y2="4" stroke="currentColor" strokeWidth="1"/>
-    </svg>
-  )
-}
-
-function IconSun({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
-      <circle cx="7" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.2"/>
-      <line x1="7" y1="0.5" x2="7" y2="2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="7" y1="11.5" x2="7" y2="13.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="0.5" y1="7" x2="2.5" y2="7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="11.5" y1="7" x2="13.5" y2="7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="2.4" y1="2.4" x2="3.8" y2="3.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="10.2" y1="10.2" x2="11.6" y2="11.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="11.6" y1="2.4" x2="10.2" y2="3.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <line x1="3.8" y1="10.2" x2="2.4" y2="11.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-    </svg>
-  )
-}
-
-function IconMoon({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
-      <path d="M11 7.5A4.5 4.5 0 0 1 6.5 3c0-.5.07-1 .2-1.4A5.5 5.5 0 1 0 12.4 7.3c-.45.13-.92.2-1.4.2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-    </svg>
-  )
-}
-
-function IconSpin({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
-      <path d="M12 7A5 5 0 1 1 9 2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <polyline points="9,0.5 9,3 11.5,3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  )
-}
-
-function IconAO({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
-      <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2"/>
-      <circle cx="7" cy="7" r="3.5" stroke="currentColor" strokeWidth="1" strokeOpacity="0.7"/>
-      <circle cx="7" cy="7" r="1.5" fill="currentColor" fillOpacity="0.5"/>
-    </svg>
-  )
-}
-
-function IconReset({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
-      <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2"/>
-      <line x1="7" y1="2" x2="7" y2="4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="7" y1="10" x2="7" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="2" y1="7" x2="4" y2="7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="10" y1="7" x2="12" y2="7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <circle cx="7" cy="7" r="1.5" fill="currentColor"/>
-    </svg>
-  )
-}
 
 // ─── Toolbar divider ──────────────────────────────────────────────────────────
 function Divider() {
@@ -139,7 +58,7 @@ function Sel<T extends string>({
         color: 'var(--color-text-primary)',
         background: 'var(--color-background)',
         border: '1px solid var(--color-border)',
-        borderRadius: 5,
+        borderRadius: 6,
         padding: '3px 18px 3px 7px',
         outline: 'none',
         cursor: 'pointer',
@@ -175,7 +94,7 @@ function IBtn({
         justifyContent: 'center',
         width: 26,
         height: 26,
-        borderRadius: 5,
+        borderRadius: 6,
         border: active
           ? '1px solid var(--color-accent)'
           : '1px solid var(--color-border)',
@@ -282,7 +201,7 @@ export function ViewerControls({
         onClick={() => onCameraModeChange(cameraMode === 'perspective' ? 'orthographic' : 'perspective')}
         title={cameraMode === 'perspective' ? 'Switch to Orthographic' : 'Switch to Perspective'}
       >
-        {cameraMode === 'perspective' ? <IconPerspective /> : <IconOrtho />}
+        {cameraMode === 'perspective' ? <Box size={13} strokeWidth={1.75} /> : <Square size={13} strokeWidth={1.75} />}
       </IBtn>
 
       {/* Background */}
@@ -291,7 +210,7 @@ export function ViewerControls({
         onClick={() => onViewerBgChange(viewerBg === 'dark' ? 'light' : 'dark')}
         title={viewerBg === 'dark' ? 'Light Background' : 'Dark Background'}
       >
-        {viewerBg === 'dark' ? <IconMoon /> : <IconSun />}
+        {viewerBg === 'dark' ? <Moon size={13} strokeWidth={1.75} /> : <Sun size={13} strokeWidth={1.75} />}
       </IBtn>
 
       {/* Auto-spin */}
@@ -300,7 +219,7 @@ export function ViewerControls({
         onClick={() => onSpinChange(!spinning)}
         title={spinning ? 'Stop Rotation' : 'Auto-Rotate'}
       >
-        <IconSpin />
+        <RotateCw size={13} strokeWidth={1.75} />
       </IBtn>
 
       {/* Speed slider — only visible while spinning */}
@@ -317,7 +236,7 @@ export function ViewerControls({
             title={`Rotation speed: 1 revolution every ${Math.round(1 / spinSpeed)}s`}
           />
           <span style={{
-            fontSize: 9,
+            fontSize: 11,
             fontFamily: 'JetBrains Mono, monospace',
             color: 'var(--color-text-secondary)',
             width: 24,
@@ -335,12 +254,12 @@ export function ViewerControls({
         onClick={() => onAOChange(!showAO)}
         title={showAO ? 'Disable Ambient Occlusion' : 'Enable Ambient Occlusion'}
       >
-        <IconAO />
+        <Layers size={13} strokeWidth={1.75} />
       </IBtn>
 
       {/* Reset view */}
       <IBtn active={false} onClick={onResetView} title="Reset Camera">
-        <IconReset />
+        <Home size={13} strokeWidth={1.75} />
       </IBtn>
 
       <Divider />

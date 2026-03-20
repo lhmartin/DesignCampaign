@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback } from 'react'
+import { Eye, EyeOff, Palette, Search as SearchIcon, X, MousePointer2 } from 'lucide-react'
 import { useSelectionStore, type SelectionKey } from '@/stores/selection-store'
 import { useInterfaceStore } from '@/stores/interface-store'
 import { useFileStore } from '@/stores/file-store'
@@ -88,17 +89,17 @@ function InterfaceGroup({
       {[...byChain.entries()].map(([chain, ids]) => (
         <div key={chain}>
           <div style={{ padding: '3px 12px', display: 'flex', alignItems: 'center', gap: 6, background: 'var(--color-secondary-bg)' }}>
-            <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               Chain {chain}
             </span>
-            <span style={{ fontSize: 9, color: 'var(--color-text-disabled)', marginLeft: 'auto', fontFamily: 'JetBrains Mono, monospace' }}>
+            <span style={{ fontSize: 10, color: 'var(--color-text-disabled)', marginLeft: 'auto', fontFamily: 'JetBrains Mono, monospace' }}>
               {compactRanges(ids)}
             </span>
           </div>
           <div style={{ padding: '4px 8px', display: 'flex', flexWrap: 'wrap', gap: 3 }}>
             {ids.map(id => (
               <span key={id} style={{
-                padding: '1px 5px', borderRadius: 6, fontSize: 9, fontFamily: 'JetBrains Mono, monospace',
+                padding: '1px 5px', borderRadius: 6, fontSize: 10, fontFamily: 'JetBrains Mono, monospace',
                 background: `color-mix(in srgb, ${accentColor} 12%, transparent)`,
                 color: accentColor, border: `1px solid ${accentColor}30`,
               }}>{id}</span>
@@ -328,7 +329,7 @@ function SearchPanel({ selId }: { selId: string }) {
       {/* Results */}
       {results.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <div style={{ fontSize: 9, color: 'var(--color-text-disabled)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+          <div style={{ fontSize: 10, color: 'var(--color-text-disabled)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
             {results.length} hit{results.length !== 1 ? 's' : ''} — sorted by coverage
           </div>
           <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4 }}>
@@ -352,7 +353,7 @@ function SearchPanel({ selId }: { selId: string }) {
                 <span style={{ fontSize: 10, flex: 1, fontFamily: 'Outfit, sans-serif', color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {hit.name}
                 </span>
-                <span style={{ fontSize: 9, fontFamily: 'JetBrains Mono, monospace', color: 'var(--color-accent)', flexShrink: 0 }}>
+                <span style={{ fontSize: 10, fontFamily: 'JetBrains Mono, monospace', color: 'var(--color-accent)', flexShrink: 0 }}>
                   {hit.hitCount}/{hit.totalCount} ({Math.round(hit.hitFraction * 100)}%)
                 </span>
                 <span style={{ fontSize: 9, color: 'var(--color-text-disabled)', flexShrink: 0 }}>↗</span>
@@ -434,7 +435,7 @@ function NamedSelectionRow({ sel }: { sel: import('@/stores/named-selection-stor
 
         {/* Chain badge */}
         <span style={{
-          fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 99, flexShrink: 0,
+          fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 99, flexShrink: 0,
           background: `${hex}22`, color: hex, border: `1px solid ${hex}44`,
         }}>
           {sel.chainId}
@@ -449,10 +450,10 @@ function NamedSelectionRow({ sel }: { sel: import('@/stores/named-selection-stor
             border: `1px solid ${sel.visible ? hex + '60' : 'var(--color-border)'}`,
             background: sel.visible ? `${hex}18` : 'transparent',
             color: sel.visible ? hex : 'var(--color-text-disabled)',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
-          {sel.visible ? '👁' : '○'}
+          {sel.visible ? <Eye size={11} strokeWidth={1.75} /> : <EyeOff size={11} strokeWidth={1.75} />}
         </button>
 
         {/* Color in viewer toggle */}
@@ -464,10 +465,10 @@ function NamedSelectionRow({ sel }: { sel: import('@/stores/named-selection-stor
             border: `1px solid ${isColorActive ? hex + '80' : 'var(--color-border)'}`,
             background: isColorActive ? `${hex}25` : 'transparent',
             color: isColorActive ? hex : 'var(--color-text-disabled)',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
-          🎨
+          <Palette size={11} strokeWidth={1.75} />
         </button>
 
         {/* Search toggle */}
@@ -479,10 +480,10 @@ function NamedSelectionRow({ sel }: { sel: import('@/stores/named-selection-stor
             border: `1px solid ${isOpen ? 'var(--color-accent)' : 'var(--color-border)'}`,
             background: isOpen ? 'color-mix(in srgb, var(--color-accent) 18%, transparent)' : 'transparent',
             color: isOpen ? 'var(--color-accent)' : 'var(--color-text-secondary)',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
-          🔍
+          <SearchIcon size={11} strokeWidth={1.75} />
         </button>
 
         {/* Delete */}
@@ -493,15 +494,15 @@ function NamedSelectionRow({ sel }: { sel: import('@/stores/named-selection-stor
             width: 20, height: 20, borderRadius: 4, flexShrink: 0,
             border: '1px solid var(--color-border)',
             background: 'transparent', color: 'var(--color-text-disabled)',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
-          ×
+          <X size={11} strokeWidth={1.75} />
         </button>
       </div>
 
       {/* Residue count hint */}
-      <div style={{ padding: '0 10px 4px 26px', fontSize: 9, color: 'var(--color-text-disabled)' }}>
+      <div style={{ padding: '0 10px 4px 26px', fontSize: 10, color: 'var(--color-text-disabled)' }}>
         {sel.residues.length} residue{sel.residues.length !== 1 ? 's' : ''}
       </div>
 
@@ -564,7 +565,7 @@ export function SelectionPanel() {
       {/* Empty state */}
       {totalSelected === 0 && !hasInterface && !hasNamedSels && (
         <div className="flex flex-col items-center justify-center flex-1 text-[var(--color-text-disabled)] gap-2 px-6 text-center">
-          <span className="text-2xl">🖱️</span>
+          <MousePointer2 size={28} className="opacity-40" />
           <p>Click residues in the 3D viewer to select them.</p>
           <p className="text-[10px]">Hold <kbd className="px-1 py-0.5 rounded bg-[var(--color-secondary-bg)] border border-[var(--color-border)] font-mono">Ctrl</kbd> to add/remove individual residues.</p>
           <p className="text-[10px] mt-1 text-[var(--color-text-disabled)]">Use the <strong>Interface</strong> button in the viewer toolbar to detect epitope &amp; paratope residues.</p>
@@ -590,7 +591,7 @@ export function SelectionPanel() {
               display: 'flex', alignItems: 'center', gap: 6,
             }}>
               Named Epitopes
-              <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: 'JetBrains Mono, monospace', color: 'var(--color-text-disabled)' }}>
+              <span style={{ marginLeft: 'auto', fontSize: 10, fontFamily: 'JetBrains Mono, monospace', color: 'var(--color-text-disabled)' }}>
                 {selections.length}
               </span>
             </div>

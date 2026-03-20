@@ -29,13 +29,13 @@ type ColorMode = 'none' | 'chemical' | 'hydrophobicity' | 'plddt' | 'rmsd'
 
 // ─── CDR annotation track colors ──────────────────────────────────────────────
 const REGION_COLORS: Record<CdrRegionName, { bg: string; fg: string }> = {
-  CDR1: { bg: 'rgba(239,68,68,0.65)',   fg: '#ffffff' },
-  CDR2: { bg: 'rgba(249,115,22,0.65)',  fg: '#ffffff' },
-  CDR3: { bg: 'rgba(234,179,8,0.65)',   fg: '#0a0e1a' },
-  FW1:  { bg: 'rgba(100,120,160,0.18)', fg: 'var(--color-text-disabled)' },
-  FW2:  { bg: 'rgba(100,120,160,0.18)', fg: 'var(--color-text-disabled)' },
-  FW3:  { bg: 'rgba(100,120,160,0.18)', fg: 'var(--color-text-disabled)' },
-  FW4:  { bg: 'rgba(100,120,160,0.18)', fg: 'var(--color-text-disabled)' },
+  CDR1: { bg: 'var(--color-cdr1)', fg: 'var(--color-cdr1-fg)' },
+  CDR2: { bg: 'var(--color-cdr2)', fg: 'var(--color-cdr2-fg)' },
+  CDR3: { bg: 'var(--color-cdr3)', fg: 'var(--color-cdr3-fg)' },
+  FW1:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
+  FW2:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
+  FW3:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
+  FW4:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
 }
 
 // ─── CDR span helpers ─────────────────────────────────────────────────────────

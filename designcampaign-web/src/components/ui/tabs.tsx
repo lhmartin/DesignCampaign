@@ -9,7 +9,7 @@ const TabsList = ({
 }: React.ComponentProps<typeof TabsPrimitive.List>) => (
   <TabsPrimitive.List
     className={cn(
-      'flex h-9 items-center justify-start border-b border-[var(--color-border)] bg-[var(--color-background)] px-1 text-[var(--color-text-secondary)] w-full shrink-0',
+      'flex h-8 items-center justify-start border-b border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-secondary)] w-full shrink-0',
       className
     )}
     {...props}
@@ -22,7 +22,7 @@ const TabsTrigger = ({
 }: React.ComponentProps<typeof TabsPrimitive.Trigger>) => (
   <TabsPrimitive.Trigger
     className={cn(
-      'inline-flex items-center justify-center whitespace-nowrap px-3 py-1.5 text-xs font-medium transition-all focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=active]:text-[var(--color-text-primary)] data-[state=active]:border-b-2 data-[state=active]:border-[var(--color-accent)] data-[state=active]:-mb-px hover:text-[var(--color-text-primary)]',
+      'inline-flex items-center justify-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-[11px] tracking-wide font-medium transition-all focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=active]:text-[var(--color-text-primary)] data-[state=active]:border-b-2 data-[state=active]:border-[var(--color-accent)] data-[state=active]:-mb-px hover:text-[var(--color-text-primary)]',
       className
     )}
     {...props}

@@ -1,4 +1,5 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useFilterStore, type ComparisonOp, type RankingMode, type RankingMetric, type FilterRule, type NumericFilterRule, type ResidueFilterRule } from '@/stores/filter-store'
 import { useMetricsStore, type ProteinMetrics } from '@/stores/metrics-store'
 import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
@@ -73,7 +74,7 @@ function SectionHeader({ label, children }: { label: string; children?: ReactNod
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px 6px' }}>
       <span style={{
-        fontSize: 9,
+        fontSize: 10,
         fontWeight: 700,
         letterSpacing: '0.12em',
         textTransform: 'uppercase',
@@ -267,7 +268,7 @@ function ResidueRuleRow({ rule }: { rule: ResidueFilterRule }) {
         onClick={() => updateRule(rule.id, { mode: rule.mode === 'any' ? 'all' : 'any' })}
         title={rule.mode === 'any' ? 'ANY: at least one residue must be present — click to require ALL' : 'ALL: every residue must be present — click to require ANY'}
         style={{
-          fontSize: 9, fontWeight: 700,
+          fontSize: 10, fontWeight: 700,
           padding: '2px 5px',
           borderRadius: 4,
           border: '1px solid var(--color-border)',
@@ -498,7 +499,8 @@ export function FilterPanel() {
   // Keep ranking metric list in sync with allColumns
   useEffect(() => { syncRankingMetrics(allColumns) }, [allColumns])
 
-  const importFileRef = useRef<HTMLInputElement>(null)
+  const importFileRef   = useRef<HTMLInputElement>(null)
+  const [rankingOpen, setRankingOpen] = useState(false)
 
   const handleSavePreset = () => {
     const name = window.prompt('Preset name:')
@@ -527,7 +529,8 @@ export function FilterPanel() {
   const activeRuleCount = rules.filter(r =>
     r.type === 'residue' ? !!(r.residues?.trim()) : !!(r as NumericFilterRule).metric
   ).length
-  const activeRankingCount = rankingMetrics.filter(m => m.active).length
+  const activeRankingMetrics = rankingMetrics.filter(m => m.active)
+  const activeRankingCount   = activeRankingMetrics.length
 
   return (
     <div style={{
@@ -542,7 +545,7 @@ export function FilterPanel() {
       <SectionHeader label="Filters">
         {activeRuleCount > 0 && (
           <span style={{
-            fontSize: 9,
+            fontSize: 10,
             padding: '1px 5px',
             borderRadius: 99,
             background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
@@ -598,12 +601,27 @@ export function FilterPanel() {
       </div>
 
       {/* ── Ranking section ──────────────────────────────────────────────── */}
-      <SectionHeader label="Ranking">
+
+      {/* Clickable header — collapses/expands the config */}
+      <button
+        onClick={() => setRankingOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '10px 12px 6px', width: '100%',
+          background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <span style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: 'var(--color-text-secondary)',
+          whiteSpace: 'nowrap',
+        }}>
+          Ranking
+        </span>
+        <div style={{ flex: 1, height: 1, background: 'var(--color-border)' }} />
         {activeRankingCount > 0 && (
           <span style={{
-            fontSize: 9,
-            padding: '1px 5px',
-            borderRadius: 99,
+            fontSize: 10, padding: '1px 5px', borderRadius: 99,
             background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
             color: 'var(--color-accent)',
             border: '1px solid color-mix(in srgb, var(--color-accent) 30%, transparent)',
@@ -612,58 +630,77 @@ export function FilterPanel() {
             {activeRankingCount} active
           </span>
         )}
-      </SectionHeader>
+        {rankingOpen
+          ? <ChevronUp size={13} strokeWidth={1.75} style={{ color: 'var(--color-text-disabled)', flexShrink: 0 }} />
+          : <ChevronDown size={13} strokeWidth={1.75} style={{ color: 'var(--color-text-disabled)', flexShrink: 0 }} />
+        }
+      </button>
 
-      {/* Mode toggle */}
-      <div style={{ display: 'flex', gap: 5, padding: '2px 12px 8px' }}>
-        <ModeBtn value="borda"        label="Rank sum"     current={rankingMode} onSelect={setRankingMode} />
-        <ModeBtn value="weighted-sum" label="Weighted sum" current={rankingMode} onSelect={setRankingMode} />
-      </div>
-
-      {rankingMetrics.length === 0 ? (
-        <p style={{
-          fontSize: 10,
-          color: 'var(--color-text-disabled)',
-          padding: '4px 12px 8px',
-          margin: 0,
-        }}>
-          Calculate or import metrics first.
-        </p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingBottom: 6 }}>
-          {rankingMetrics.map(rm => (
-            <RankingMetricRow key={rm.metric} rm={rm} mode={rankingMode} />
-          ))}
+      {/* Collapsed summary — active metrics listed on one line */}
+      {!rankingOpen && activeRankingCount > 0 && (
+        <div style={{ padding: '0 12px 8px', display: 'flex', alignItems: 'baseline', gap: 5 }}>
+          <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', flexShrink: 0 }}>
+            {rankingMode === 'borda' ? 'Rank sum' : 'Weighted sum'}
+          </span>
+          <span style={{ fontSize: 10, color: 'var(--color-border)' }}>·</span>
+          <span style={{
+            fontSize: 10, color: 'var(--color-text-disabled)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {activeRankingMetrics.map(m => shortLabel(m.metric)).join(', ')}
+          </span>
         </div>
       )}
 
-      {/* Apply ranking */}
-      <div style={{ padding: '2px 12px 12px' }}>
-        <button
-          onClick={handleApplyRanking}
-          disabled={activeRankingCount === 0 || rows.length === 0}
-          style={{
-            fontSize: 11,
-            fontFamily: 'Outfit, sans-serif',
-            fontWeight: 600,
-            padding: '4px 14px',
-            borderRadius: 5,
-            border: '1px solid color-mix(in srgb, var(--color-accent) 50%, transparent)',
-            background: 'color-mix(in srgb, var(--color-accent) 14%, transparent)',
-            color: 'var(--color-accent)',
-            cursor: activeRankingCount > 0 && rows.length > 0 ? 'pointer' : 'not-allowed',
-            opacity: activeRankingCount > 0 && rows.length > 0 ? 1 : 0.4,
-            width: '100%',
-          }}
-        >
-          Apply Ranking
-        </button>
-        {rows.some(r => r.metrics['rank_score'] !== undefined) && (
-          <p style={{ fontSize: 9, color: 'var(--color-text-disabled)', margin: '4px 0 0', textAlign: 'center' }}>
-            rank_score column active in Metrics &amp; Plot
-          </p>
-        )}
-      </div>
+      {/* Expanded config */}
+      {rankingOpen && (
+        <>
+          {/* Mode toggle */}
+          <div style={{ display: 'flex', gap: 5, padding: '2px 12px 8px' }}>
+            <ModeBtn value="borda"        label="Rank sum"     current={rankingMode} onSelect={setRankingMode} />
+            <ModeBtn value="weighted-sum" label="Weighted sum" current={rankingMode} onSelect={setRankingMode} />
+          </div>
+
+          {rankingMetrics.length === 0 ? (
+            <p style={{ fontSize: 10, color: 'var(--color-text-disabled)', padding: '4px 12px 8px', margin: 0 }}>
+              Calculate or import metrics first.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingBottom: 6 }}>
+              {rankingMetrics.map(rm => (
+                <RankingMetricRow key={rm.metric} rm={rm} mode={rankingMode} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Apply ranking — only shown when metrics are configured */}
+      {activeRankingCount > 0 && (
+        <div style={{ padding: '0 12px 12px' }}>
+          <button
+            onClick={handleApplyRanking}
+            disabled={rows.length === 0}
+            style={{
+              fontSize: 11, fontFamily: 'Outfit, sans-serif', fontWeight: 600,
+              padding: '4px 14px', borderRadius: 5,
+              border: '1px solid color-mix(in srgb, var(--color-accent) 50%, transparent)',
+              background: 'color-mix(in srgb, var(--color-accent) 14%, transparent)',
+              color: 'var(--color-accent)',
+              cursor: rows.length > 0 ? 'pointer' : 'not-allowed',
+              opacity: rows.length > 0 ? 1 : 0.4,
+              alignSelf: 'flex-start',
+            }}
+          >
+            Apply Ranking
+          </button>
+          {rows.some(r => r.metrics['rank_score'] !== undefined) && (
+            <p style={{ fontSize: 10, color: 'var(--color-text-disabled)', margin: '4px 0 0' }}>
+              rank_score column active in Metrics &amp; Plot
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── Presets section ──────────────────────────────────────────────── */}
       <SectionHeader label="Presets" />

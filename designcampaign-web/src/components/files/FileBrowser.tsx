@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
+import { FolderOpen, LayoutGrid } from 'lucide-react'
 import { useFileStore } from '@/stores/file-store'
 import { useProteinStore } from '@/stores/protein-store'
 import { useGroupStore } from '@/stores/group-store'
@@ -143,16 +144,16 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
             <button
               onClick={() => setViewMode('tree')}
               title="Folder tree view"
-              className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${viewMode === 'tree' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}`}
+              className={`flex items-center px-1.5 py-0.5 rounded text-[10px] transition-colors ${viewMode === 'tree' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}`}
             >
-              📁
+              <FolderOpen size={13} />
             </button>
             <button
               onClick={() => setViewMode('groups')}
               title="Sequence-identity groups view"
-              className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${viewMode === 'groups' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}`}
+              className={`flex items-center px-1.5 py-0.5 rounded text-[10px] transition-colors ${viewMode === 'groups' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}`}
             >
-              ⋮⋮
+              <LayoutGrid size={13} />
             </button>
           </div>
         )}

@@ -260,11 +260,11 @@ export function UniProtPanel() {
           display: 'flex', flexDirection: 'column', gap: 4,
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ ...S.muted, fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            <div style={{ ...S.muted, fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               Active structure
             </div>
             {seqCopied && (
-              <div style={{ ...S.muted, fontSize: 9, color: 'var(--color-accent)' }}>
+              <div style={{ ...S.muted, fontSize: 10, color: 'var(--color-accent)' }}>
                 ✓ Chain {activeChains[0].chain} sequence copied
               </div>
             )}
@@ -313,7 +313,7 @@ export function UniProtPanel() {
           {/* Email for EBI fair-use */}
           {(editEmail || !blastEmail) ? (
             <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginTop: 2 }}>
-              <span style={{ ...S.muted, fontSize: 9, flexShrink: 0 }}>EBI email:</span>
+              <span style={{ ...S.muted, fontSize: 10, flexShrink: 0 }}>EBI email:</span>
               <input
                 autoFocus
                 defaultValue={blastEmail}
@@ -331,10 +331,10 @@ export function UniProtPanel() {
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginTop: 2 }}>
-              <span style={{ ...S.muted, fontSize: 9 }}>EBI: {blastEmail}</span>
+              <span style={{ ...S.muted, fontSize: 10 }}>EBI: {blastEmail}</span>
               <button
                 onClick={() => setEditEmail(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', ...S.muted, fontSize: 9, padding: 0, textDecoration: 'underline' }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', ...S.muted, fontSize: 10, padding: 0, textDecoration: 'underline' }}
               >
                 change
               </button>
@@ -393,8 +393,8 @@ export function UniProtPanel() {
                 >
                   <span style={{ ...S.mono, fontSize: 10, color: 'var(--color-accent)' }}>{hit.accession}</span>
                   <span style={{ ...S.base, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hit.description}</span>
-                  <span style={{ ...S.muted, fontSize: 9, textAlign: 'right', whiteSpace: 'nowrap' }}>{hit.identity}% id</span>
-                  <span style={{ ...S.muted, ...S.mono, fontSize: 9, textAlign: 'right', whiteSpace: 'nowrap' }}>{fmtEvalue(hit.evalue)}</span>
+                  <span style={{ ...S.muted, fontSize: 10, textAlign: 'right', whiteSpace: 'nowrap' }}>{hit.identity}% id</span>
+                  <span style={{ ...S.muted, ...S.mono, fontSize: 10, textAlign: 'right', whiteSpace: 'nowrap' }}>{fmtEvalue(hit.evalue)}</span>
                 </button>
               ))}
             </div>
@@ -423,8 +423,8 @@ export function UniProtPanel() {
           style={{
             padding: '4px 12px', borderRadius: 5, fontSize: 11,
             fontFamily: 'Outfit, sans-serif', fontWeight: 600,
-            border: '1px solid var(--color-border)',
-            background: 'var(--color-accent)', color: '#0a0e1a',
+            border: '1px solid color-mix(in srgb, var(--color-accent) 40%, transparent)',
+            background: 'color-mix(in srgb, var(--color-accent) 20%, transparent)', color: 'var(--color-accent)',
             cursor: loading ? 'wait' : 'pointer', flexShrink: 0,
           }}
         >
