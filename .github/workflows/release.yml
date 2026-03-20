@@ -30,8 +30,8 @@ jobs:
         run: npm ci
         working-directory: designcampaign-web
 
-      - name: Build Windows installer
-        run: npm run build:win
+      - name: Build & publish Windows installer
+        run: npm run typecheck && npm run prepare:uv && npm run build:vite && npx electron-builder --win --publish always
         working-directory: designcampaign-web
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,8 +54,8 @@ jobs:
         run: npm ci
         working-directory: designcampaign-web
 
-      - name: Build macOS DMG
-        run: npm run build:mac
+      - name: Build & publish macOS DMG
+        run: npm run typecheck && npm run prepare:uv && npm run build:vite && npx electron-builder --mac --publish always
         working-directory: designcampaign-web
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -78,8 +78,8 @@ jobs:
         run: npm ci
         working-directory: designcampaign-web
 
-      - name: Build Linux AppImage + deb
-        run: npm run build:linux
+      - name: Build & publish Linux AppImage + deb
+        run: npm run typecheck && npm run prepare:uv && npm run build:vite && npx electron-builder --linux --publish always
         working-directory: designcampaign-web
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
