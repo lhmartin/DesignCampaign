@@ -39,8 +39,20 @@ function httpsGetText(url) {
 }
 
 async function fetchLatestVersion() {
-  const json = await httpsGetText('https://api.github.com/repos/astral-sh/uv/releases/latest')
-  return JSON.parse(json).tag_name
+  // Follow the /releases/latest redirect — the Location header contains the tag.
+  // Avoids the 60 req/hour rate limit on the JSON API endpoint.
+  return new Promise((resolve, reject) => {
+    https.get(
+      'https://github.com/astral-sh/uv/releases/latest',
+      { headers: { 'User-Agent': 'designcampaign-build' } },
+      res => {
+        const loc = res.headers.location ?? ''
+        const match = loc.match(/\/tag\/(.+)$/)
+        if (match) { res.resume(); resolve(match[1]); return }
+        reject(new Error(`Could not extract version from redirect location: "${loc}" (status ${res.statusCode})`))
+      }
+    ).on('error', reject)
+  })
 }
 
 function download(url, destPath) {
