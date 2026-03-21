@@ -1,9 +1,32 @@
 import { app, BrowserWindow, Menu, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import fs from 'node:fs'
 import { autoUpdater } from 'electron-updater'
 import { registerIpcHandlers, cleanupWatchers } from './ipc-handlers'
 import { isEnvReady, runSetup } from './python-setup'
+
+// ── Window state persistence ──────────────────────────────────────────────────
+
+interface WindowState { width: number; height: number; x?: number; y?: number }
+
+function windowStatePath(): string {
+  return path.join(app.getPath('userData'), 'window-state.json')
+}
+
+function loadWindowState(): WindowState {
+  try {
+    const raw = JSON.parse(fs.readFileSync(windowStatePath(), 'utf-8')) as WindowState
+    if (typeof raw.width === 'number' && raw.width >= 800 &&
+        typeof raw.height === 'number' && raw.height >= 600) return raw
+  } catch { /* first launch or corrupt file — use defaults */ }
+  return { width: 1200, height: 800 }
+}
+
+function saveWindowState(w: BrowserWindow): void {
+  if (w.isMinimized() || w.isMaximized() || w.isFullScreen()) return
+  try { fs.writeFileSync(windowStatePath(), JSON.stringify(w.getBounds()), 'utf-8') } catch { /* ignore */ }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -20,9 +43,9 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 let win: BrowserWindow | null = null
 
 function createWindow(): void {
+  const savedState = loadWindowState()
   win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    ...savedState,
     minWidth: 800,
     minHeight: 600,
     title: 'DesignCampaign',
@@ -33,6 +56,9 @@ function createWindow(): void {
       sandbox: false,
     },
   })
+
+  win.on('resize', () => win && saveWindowState(win))
+  win.on('move',   () => win && saveWindowState(win))
 
   // Application menu
   const menu = Menu.buildFromTemplate([

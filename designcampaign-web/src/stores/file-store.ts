@@ -95,7 +95,7 @@ export const useFileStore = create<FileStore>()(
     }),
     {
       name: 'dc-file-store',
-      partialize: (s) => ({ currentFolder: s.currentFolder }),
+      partialize: (s) => ({ currentFolder: s.currentFolder, activeFile: s.activeFile }),
     },
   ),
 )
