@@ -129,7 +129,11 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     }
   })
 
-  ipcMain.handle('python:setup-status', () => ({ ready: isEnvReady() }))
+  ipcMain.handle('python:setup-status', () => {
+    // In E2E test mode, pretend Python is ready so the setup modal doesn't block tests.
+    if (process.env['E2E_TEST'] === '1') return { ready: true }
+    return { ready: isEnvReady() }
+  })
 
   ipcMain.handle('python:run-setup', async () => {
     const win = getMainWindow()

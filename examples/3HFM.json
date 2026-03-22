@@ -1,0 +1,11 @@
+{
+  "plddt_binder": 85.8,
+  "rosetta_total_score": -2891.2,
+  "ddg": -51.3,
+  "pae_interaction": 5.1,
+  "shape_complementarity": 0.74,
+  "binder_length": 429,
+  "resolution_A": 3.0,
+  "binder_chain": "H",
+  "target_chain": "Y"
+}

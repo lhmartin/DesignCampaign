@@ -572,28 +572,36 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
   function MolstarViewer({ onStructureLoaded, onError, onNeedPythonSetup }, ref) {
     const containerRef = useRef<HTMLDivElement>(null)
     const { plugin, isLoading, error, setIsLoading } = useMolstar(containerRef)
-    const [style, setStyle] = useState<RepresentationStyle>('cartoon')
+    // Initialise from persisted store so settings survive reloads.
+    const [style,      setStyle]      = useState<RepresentationStyle>(() => useViewerPrefsStore.getState().style)
     const colorScheme    = useViewerPrefsStore(s => s.colorScheme)
     const setColorScheme = useViewerPrefsStore(s => s.setColorScheme)
-    const [cameraMode, setCameraMode] = useState<'perspective' | 'orthographic'>('perspective')
-    const [viewerBg, setViewerBg] = useState<'dark' | 'light'>('dark')
-    const [spinning, setSpinning] = useState(false)
-    const [spinSpeed, setSpinSpeed] = useState(0.2) // 1 rotation every 5s
+    const saveStyle      = useViewerPrefsStore(s => s.setStyle)
+    const saveCameraMode = useViewerPrefsStore(s => s.setCameraMode)
+    const saveViewerBg   = useViewerPrefsStore(s => s.setViewerBg)
+    const saveSpinning   = useViewerPrefsStore(s => s.setSpinning)
+    const saveSpinSpeed  = useViewerPrefsStore(s => s.setSpinSpeed)
+    const [cameraMode, setCameraMode] = useState<'perspective' | 'orthographic'>(() => useViewerPrefsStore.getState().cameraMode)
+    const [viewerBg,   setViewerBg]   = useState<'dark' | 'light'>(() => useViewerPrefsStore.getState().viewerBg)
+    const [spinning,   setSpinning]   = useState<boolean>(() => useViewerPrefsStore.getState().spinning)
+    const [spinSpeed,  setSpinSpeed]  = useState<number>(() => useViewerPrefsStore.getState().spinSpeed)
     const [activePreset, setActivePreset] = useState<PresetId | ''>('')
+    // Incremented each time a new structure loads so style/color effects re-fire even if values unchanged.
+    const [loadCount, setLoadCount] = useState(0)
     const [seqData, setSeqData] = useState<{ seq: ChainSequence[]; values: Map<string, number> }>(
       { seq: [], values: new Map() }
     )
     const activeFile = useFileStore(s => s.activeFile)
     const { toggleResidue, addResidue, clearSelection, selectedResidues } = useSelectionStore()
 
-    // Resets viewer UI state after a new structure is loaded.
-    // All setters are stable (useState/zustand), so no deps needed.
+    // Resets transient viewer UI state after a new structure is loaded.
+    // Increments loadCount so style/color effects re-apply to the new structure.
+    // Does NOT reset style/colorScheme — the user's persisted preferences are kept.
     const resetViewerState = useCallback(() => {
-      setStyle('cartoon')
-      setColorScheme('chain-id')
+      setLoadCount(c => c + 1)
       setActivePreset('')
       clearSelection()
-    }, [clearSelection]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [clearSelection])
 
     // Sync selection store → 3D viewer so external selectAll() calls (InterfaceGroup, etc.) highlight in Mol*.
     // SequenceViewer handles its own click-driven sync; this handles all other sources.
@@ -651,12 +659,12 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
     useEffect(() => {
       if (!plugin) return
       applyStyle(plugin, style).catch(console.error)
-    }, [plugin, style])
+    }, [plugin, style, loadCount])
 
     useEffect(() => {
       if (!plugin) return
       applyColorScheme(plugin, colorScheme).catch(console.error)
-    }, [plugin, colorScheme])
+    }, [plugin, colorScheme, loadCount])
 
     // Sync extracted sequences to the shared store so other panels (e.g. UniProt) can read them.
     useEffect(() => {
@@ -783,13 +791,13 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
                 viewerBg={viewerBg}
                 spinning={spinning}
                 spinSpeed={spinSpeed}
-                onStyleChange={v => { setStyle(v); setActivePreset('') }}
+                onStyleChange={v => { setStyle(v); saveStyle(v); setActivePreset('') }}
                 onColorChange={v => { setColorScheme(v); setActivePreset('') }}
                 onPresetChange={setActivePreset}
-                onCameraModeChange={setCameraMode}
-                onViewerBgChange={setViewerBg}
-                onSpinChange={setSpinning}
-                onSpinSpeedChange={setSpinSpeed}
+                onCameraModeChange={v => { setCameraMode(v); saveCameraMode(v) }}
+                onViewerBgChange={v => { setViewerBg(v); saveViewerBg(v) }}
+                onSpinChange={v => { setSpinning(v); saveSpinning(v) }}
+                onSpinSpeedChange={v => { setSpinSpeed(v); saveSpinSpeed(v) }}
                 onResetView={() => { try { plugin.canvas3d?.requestCameraReset() } catch { /* best effort */ } }}
               />
             </div>

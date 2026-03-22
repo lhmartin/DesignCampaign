@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { useDefaultLayout } from 'react-resizable-panels'
 import { FolderOpen, Table2, ScatterChart, Grid2x2, GitMerge, SlidersHorizontal, MousePointer2, Database, Sun, Moon } from 'lucide-react'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -12,6 +13,7 @@ import { SelectionPanel } from '@/components/selection/SelectionPanel'
 import { FilterPanel } from '@/components/filter/FilterPanel'
 import { UniProtPanel } from '@/components/metrics/UniProtPanel'
 import { useFileStore } from '@/stores/file-store'
+import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { UpdateBanner } from './UpdateBanner'
 import { PythonSetupModal } from './PythonSetupModal'
 
@@ -35,14 +37,27 @@ export function AppShell() {
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
   const [showPythonSetup, setShowPythonSetup] = useState(false)
 
+  // Persist panel layout across sessions via localStorage.
+  // useDefaultLayout reads/writes to localStorage keyed by `id`.
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: 'dc-main-layout',
+    storage: localStorage,
+    panelIds: ['left-panel', 'right-panel'],
+  })
+
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
   }, [isDark])
 
-  // Auto-restore last folder on startup (currentFolder hydrated by zustand-persist)
+  // Auto-restore last folder and last active file on startup.
+  // Both values are hydrated by zustand-persist before the first render.
+  // requestLoadFile sets requestedFilePath in viewer-prefs-store; MolstarViewer
+  // picks it up once the Mol* plugin is ready (no timing hacks needed).
   useEffect(() => {
     if (currentFolder) setFolder(currentFolder)
+    const lastFile = useFileStore.getState().activeFile
+    if (lastFile) useViewerPrefsStore.getState().requestLoadFile(lastFile)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // intentionally runs once on mount
 
@@ -129,7 +144,10 @@ export function AppShell() {
         clean gap between the two cards at its level.
       */}
       <ResizablePanelGroup
+        id="main-layout"
         orientation="horizontal"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
         style={{
           flex: 1,
           minHeight: 0,
@@ -141,7 +159,7 @@ export function AppShell() {
       >
 
         {/* ── Left card: tabbed sidebar ── */}
-        <ResizablePanel defaultSize="38%" minSize="22%" maxSize="60%">
+        <ResizablePanel id="left-panel" defaultSize="38%" minSize="22%" maxSize="60%">
           <div style={{ ...cardStyle, paddingRight: 0 }}>
             {/*
               Tabs root is flex-col so TabsContent children can expand with flex-1.
@@ -200,7 +218,7 @@ export function AppShell() {
         <ResizableHandle withHandle />
 
         {/* ── Right card: structure viewer ── */}
-        <ResizablePanel defaultSize="62%" minSize="30%">
+        <ResizablePanel id="right-panel" defaultSize="62%" minSize="30%">
           <div style={cardStyle}>
             <MolstarViewer
               ref={viewerRef}
