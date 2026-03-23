@@ -9,7 +9,7 @@ const TabsList = ({
 }: React.ComponentProps<typeof TabsPrimitive.List>) => (
   <TabsPrimitive.List
     className={cn(
-      'flex h-8 items-center justify-start border-b border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-secondary)] w-full shrink-0',
+      'flex h-8 items-center justify-start border-b border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-secondary)] w-full shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
       className
     )}
     {...props}
