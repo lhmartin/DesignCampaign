@@ -71,6 +71,6 @@ export const useClaudeStore = create<ClaudeStore>()(
       setKeyConfigured: (v) => set({ keyConfigured: v }),
       clearHistory: () => set({ messages: [] }),
     }),
-    { name: 'dc-claude', partialize: (s) => ({ messages: s.messages }) },
+    { name: 'dc-claude', partialize: (s) => ({ messages: s.messages.slice(-200) }) },
   ),
 )

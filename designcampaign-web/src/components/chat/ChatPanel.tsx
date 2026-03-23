@@ -163,20 +163,14 @@ export function ChatPanel() {
     addUserMessage(text)
     setThinking(true)
 
-    // Build initial API messages from history (before this new message)
-    // We rebuild from store after adding user message
-    const currentMessages = useClaudeStore.getState().messages
-
-    // Agentic loop
-    let apiMessages: Anthropic.MessageParam[] = toApiMessages(
-      currentMessages.slice(0, -0) // includes the just-added user message
-    )
-
+    // Build API messages from full history (includes the just-added user message)
+    const apiMessages: Anthropic.MessageParam[] = toApiMessages(useClaudeStore.getState().messages)  // mutated via push in loop
+    // Snapshot the system prompt once — it's constant for this turn
+    const system = buildSystemPrompt()
     const assistantMsgId = startAssistantMessage()
 
     try {
       while (true) {
-        const system = buildSystemPrompt()
         const response = await claudeChat(apiMessages, system, TOOLS) as Anthropic.Message
 
         // Extract text and tool_use blocks
@@ -207,11 +201,10 @@ export function ChatPanel() {
         }
 
         // Continue conversation with tool results
-        apiMessages = [
-          ...apiMessages,
+        apiMessages.push(
           { role: 'assistant', content: response.content },
           { role: 'user', content: toolResults },
-        ]
+        )
       }
     } catch (err) {
       appendToMessage(assistantMsgId, `\n\n*Error: ${err instanceof Error ? err.message : String(err)}*`)

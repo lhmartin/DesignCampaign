@@ -3,6 +3,7 @@ import { useFileStore } from '@/stores/file-store'
 import { useMetricsStore } from '@/stores/metrics-store'
 import { useFilterStore } from '@/stores/filter-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
+import { getFileName } from '@/lib/utils'
 
 export const TOOLS: Anthropic.Tool[] = [
   {
@@ -115,7 +116,7 @@ export function buildSystemPrompt(): string {
   const { style, colorScheme } = useViewerPrefsStore.getState()
 
   const folderLine = currentFolder ? `Folder: ${currentFolder} (${files.length} files loaded)` : 'No folder open.'
-  const activeLine = activeFile ? `Active structure: ${activeFile.split('/').pop()?.split('\\').pop()}` : 'No structure loaded.'
+  const activeLine = activeFile ? `Active structure: ${getFileName(activeFile)}` : 'No structure loaded.'
   const columnsLine = allColumns.length > 0 ? `Available metric columns: ${allColumns.join(', ')}` : 'No metrics computed yet.'
   const filtersLine = rules.length > 0
     ? `Active filters (${rules.length}): ${rules.filter(r => r.type === 'numeric').map(r => `${(r as { metric: string }).metric} ${(r as { op: string }).op} ${(r as { value: number }).value}`).join('; ')}`

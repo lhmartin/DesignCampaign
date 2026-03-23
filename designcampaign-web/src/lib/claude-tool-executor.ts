@@ -3,6 +3,7 @@ import { useMetricsStore } from '@/stores/metrics-store'
 import { useFilterStore } from '@/stores/filter-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import type { RepresentationStyle, ColorScheme } from '@/components/viewer/ViewerControls'
+import { getFileName } from '@/lib/utils'
 
 export async function executeTool(name: string, input: unknown): Promise<unknown> {
   const inp = input as Record<string, unknown>
@@ -40,9 +41,9 @@ export async function executeTool(name: string, input: unknown): Promise<unknown
       const value = inp.value as number
       const store = useFilterStore.getState()
       store.addRule()
-      // Get the newly added rule (last in array)
-      const rules = useFilterStore.getState().rules
-      const newRule = rules[rules.length - 1]
+      // Zustand updates synchronously; grab the newly-added rule (last in array)
+      const updatedRules = useFilterStore.getState().rules
+      const newRule = updatedRules[updatedRules.length - 1]
       store.updateRule(newRule.id, { metric: column, op: operator as '>' | '>=' | '<' | '<=' | '=', value })
       return { added: { column, operator, value } }
     }
@@ -57,6 +58,8 @@ export async function executeTool(name: string, input: unknown): Promise<unknown
       const metrics = inp.metrics as Array<{ column: string; direction: 'maximize' | 'minimize'; weight?: number }>
       const store = useFilterStore.getState()
       store.setRankingMode(mode as 'borda' | 'weighted-sum')
+      // Ensure all requested columns exist in rankingMetrics before updating them
+      store.syncRankingMetrics(metrics.map(m => m.column))
       for (const m of metrics) {
         store.updateRankingMetric(m.column, {
           active: true,
@@ -77,7 +80,7 @@ export async function executeTool(name: string, input: unknown): Promise<unknown
     case 'load_structure': {
       const filePath = inp.filePath as string
       useViewerPrefsStore.getState().requestLoadFile(filePath)
-      return { loading: filePath.split('/').pop()?.split('\\').pop() }
+      return { loading: getFileName(filePath) }
     }
 
     default:

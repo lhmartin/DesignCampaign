@@ -132,23 +132,26 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
 
   // ── Claude API ────────────────────────────────────────────────────────────
 
-  const claudeKeyPath = () => path.join(app.getPath('userData'), 'claude-key.enc')
+  const claudeKeyPath = path.join(app.getPath('userData'), 'claude-key.enc')
+  let claudeClient: Anthropic | null = null  // cached; reset when key changes
 
   ipcMain.handle('claude:set-key', async (_e, apiKey: string) => {
     const encrypted = safeStorage.encryptString(apiKey)
-    fs.writeFileSync(claudeKeyPath(), encrypted)
+    fs.writeFileSync(claudeKeyPath, encrypted)
+    claudeClient = new Anthropic({ apiKey })   // prime cache immediately
     return { ok: true }
   })
 
   ipcMain.handle('claude:key-status', async () => ({
-    configured: fs.existsSync(claudeKeyPath()),
+    configured: fs.existsSync(claudeKeyPath),
   }))
 
   ipcMain.handle('claude:chat', async (_e, messages: unknown, system: string, tools: unknown) => {
-    const encrypted = fs.readFileSync(claudeKeyPath())
-    const apiKey = safeStorage.decryptString(encrypted)
-    const client = new Anthropic({ apiKey })
-    return client.messages.create({
+    if (!claudeClient) {
+      const encrypted = fs.readFileSync(claudeKeyPath)
+      claudeClient = new Anthropic({ apiKey: safeStorage.decryptString(encrypted) })
+    }
+    return claudeClient.messages.create({
       model: 'claude-opus-4-6',
       max_tokens: 4096,
       system,
