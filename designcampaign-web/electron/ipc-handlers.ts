@@ -1,8 +1,9 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow, safeStorage, app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import Anthropic from '@anthropic-ai/sdk'
 import { isEnvReady, getPythonExe, getSidecarScriptPath, runSetup } from './python-setup'
 
 export interface FileInfo {
@@ -127,6 +128,33 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       watcher.close()
       watcherMap.delete(resolved)
     }
+  })
+
+  // ── Claude API ────────────────────────────────────────────────────────────
+
+  const claudeKeyPath = () => path.join(app.getPath('userData'), 'claude-key.enc')
+
+  ipcMain.handle('claude:set-key', async (_e, apiKey: string) => {
+    const encrypted = safeStorage.encryptString(apiKey)
+    fs.writeFileSync(claudeKeyPath(), encrypted)
+    return { ok: true }
+  })
+
+  ipcMain.handle('claude:key-status', async () => ({
+    configured: fs.existsSync(claudeKeyPath()),
+  }))
+
+  ipcMain.handle('claude:chat', async (_e, messages: unknown, system: string, tools: unknown) => {
+    const encrypted = fs.readFileSync(claudeKeyPath())
+    const apiKey = safeStorage.decryptString(encrypted)
+    const client = new Anthropic({ apiKey })
+    return client.messages.create({
+      model: 'claude-opus-4-6',
+      max_tokens: 4096,
+      system,
+      tools: tools as Anthropic.Tool[],
+      messages: messages as Anthropic.MessageParam[],
+    })
   })
 
   ipcMain.handle('python:setup-status', () => {

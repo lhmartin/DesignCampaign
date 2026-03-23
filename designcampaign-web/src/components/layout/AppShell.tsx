@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { useDefaultLayout } from 'react-resizable-panels'
-import { FolderOpen, Table2, ScatterChart, Grid2x2, GitMerge, SlidersHorizontal, MousePointer2, Database, Sun, Moon } from 'lucide-react'
+import { FolderOpen, Table2, ScatterChart, Grid2x2, GitMerge, SlidersHorizontal, MousePointer2, Database, Sun, Moon, MessageSquare } from 'lucide-react'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { FileBrowser } from '@/components/files/FileBrowser'
@@ -12,6 +12,7 @@ import { AlignmentViewer } from '@/components/metrics/AlignmentViewer'
 import { SelectionPanel } from '@/components/selection/SelectionPanel'
 import { FilterPanel } from '@/components/filter/FilterPanel'
 import { UniProtPanel } from '@/components/metrics/UniProtPanel'
+import { ChatPanel } from '@/components/chat/ChatPanel'
 import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { UpdateBanner } from './UpdateBanner'
@@ -178,6 +179,7 @@ export function AppShell() {
                 <span style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px', flexShrink: 0 }} />
                 <TabsTrigger value="selection"><MousePointer2 size={12} strokeWidth={1.75} />Selection</TabsTrigger>
                 <TabsTrigger value="uniprot"><Database size={12} strokeWidth={1.75} />UniProt</TabsTrigger>
+                <TabsTrigger value="chat"><MessageSquare size={12} strokeWidth={1.75} />Chat</TabsTrigger>
               </TabsList>
 
               <TabsContent value="files">
@@ -210,6 +212,10 @@ export function AppShell() {
 
               <TabsContent value="uniprot">
                 <UniProtPanel />
+              </TabsContent>
+
+              <TabsContent value="chat">
+                <ChatPanel />
               </TabsContent>
             </Tabs>
           </div>

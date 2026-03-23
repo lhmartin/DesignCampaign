@@ -65,6 +65,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('update:install')
   },
 
+  // Claude API
+  claudeSetKey: (apiKey: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('claude:set-key', apiKey),
+
+  claudeKeyStatus: (): Promise<{ configured: boolean }> =>
+    ipcRenderer.invoke('claude:key-status'),
+
+  claudeChat: (messages: unknown, system: string, tools: unknown): Promise<unknown> =>
+    ipcRenderer.invoke('claude:chat', messages, system, tools),
+
   // Python sidecar
   pythonCall: (action: string, args: unknown): Promise<unknown> =>
     ipcRenderer.invoke('python:call', action, args),
