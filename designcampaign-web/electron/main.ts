@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
 import { autoUpdater } from 'electron-updater'
-import { registerIpcHandlers, cleanupWatchers } from './ipc-handlers'
+import { registerIpcHandlers, cleanupWatchers, cleanupMarimo } from './ipc-handlers'
 import { isEnvReady, runSetup } from './python-setup'
 
 // ── Window state persistence ──────────────────────────────────────────────────
@@ -54,6 +54,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webviewTag: true,
     },
   })
 
@@ -112,6 +113,7 @@ registerIpcHandlers(() => win)
 
 app.on('window-all-closed', () => {
   cleanupWatchers()
+  cleanupMarimo()
   if (process.platform !== 'darwin') {
     app.quit()
     win = null

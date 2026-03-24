@@ -92,3 +92,35 @@ export async function runSetup(onProgress: (msg: string) => void): Promise<void>
 
   onProgress('Python environment ready.')
 }
+
+/**
+ * Install additional packages into the managed venv using `uv pip install`.
+ * This is used for optional features (e.g. marimo) that are not in the base
+ * pyproject.toml but need to be installed on-demand.
+ */
+export async function installPackages(packages: string[], onProgress: (msg: string) => void): Promise<void> {
+  const uvPath = getUvPath()
+  const pythonExe = getPythonExe()
+
+  onProgress(`Installing ${packages.join(', ')}…`)
+
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(
+      uvPath,
+      ['pip', 'install', ...packages, '--python', pythonExe],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    )
+
+    const onLine = (line: string) => { if (line.trim()) onProgress(line.trim()) }
+    createInterface({ input: proc.stdout! }).on('line', onLine)
+    createInterface({ input: proc.stderr! }).on('line', onLine)
+
+    proc.on('close', code => {
+      if (code === 0) resolve()
+      else reject(new Error(`uv pip install exited with code ${code}`))
+    })
+    proc.on('error', err => reject(new Error(`Failed to run uv: ${err.message}`)))
+  })
+
+  onProgress(`${packages.join(', ')} installed successfully.`)
+}

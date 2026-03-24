@@ -95,4 +95,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('python:setup-complete', cb)
     return () => ipcRenderer.off('python:setup-complete', cb)
   },
+
+  // Marimo notebook server
+  marimoStart: (notebookPath: string): Promise<{ port: number; contextPath: string }> =>
+    ipcRenderer.invoke('marimo:start', notebookPath),
+
+  marimoStop: (): Promise<void> =>
+    ipcRenderer.invoke('marimo:stop'),
+
+  marimoStatus: (): Promise<{ running: boolean; port: number | null }> =>
+    ipcRenderer.invoke('marimo:status'),
+
+  marimoInstall: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('marimo:install'),
+
+  marimoUpdateContext: (ctx: unknown): Promise<{ contextPath: string; metricsPath: string }> =>
+    ipcRenderer.invoke('marimo:update-context', ctx),
+
+  onMarimoInstallProgress: (cb: (msg: { done: boolean; message?: string }) => void): (() => void) => {
+    const listener = (_: Electron.IpcRendererEvent, msg: { done: boolean; message?: string }) => cb(msg)
+    ipcRenderer.on('marimo:install-progress', listener)
+    return () => ipcRenderer.off('marimo:install-progress', listener)
+  },
 })

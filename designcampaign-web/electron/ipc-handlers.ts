@@ -1,10 +1,11 @@
 import { ipcMain, dialog, BrowserWindow, safeStorage, app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import net from 'node:net'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import Anthropic from '@anthropic-ai/sdk'
-import { isEnvReady, getPythonExe, getSidecarScriptPath, runSetup } from './python-setup'
+import { isEnvReady, getPythonExe, getSidecarScriptPath, runSetup, installPackages } from './python-setup'
 
 export interface FileInfo {
   name: string
@@ -13,7 +14,40 @@ export interface FileInfo {
   mtime: number
 }
 
+interface MarimoMetricRow {
+  name: string
+  filePath: string | null
+  metrics: Record<string, number>
+}
+
+interface MarimoUpdateContext {
+  active_file: string | null
+  current_folder: string | null
+  filtered_files: string[]
+  filters: unknown
+  ranking_mode: string
+  ranking_metrics: unknown
+  metricsRows: MarimoMetricRow[]
+}
+
+// Registered before other handlers so the marimo:install channel exists when the app starts.
+export function registerMarimoInstall(getMainWindow: () => BrowserWindow | null): void {
+  ipcMain.handle('marimo:install', async () => {
+    const win = getMainWindow()
+    try {
+      await installPackages(['marimo'], msg => {
+        win?.webContents.send('marimo:install-progress', { done: false, message: msg })
+      })
+      win?.webContents.send('marimo:install-progress', { done: true })
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+}
+
 export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
+  registerMarimoInstall(getMainWindow)
 
   // Open native folder dialog
   ipcMain.handle('dialog:openFolder', async () => {
@@ -70,32 +104,27 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const resolved = path.resolve(dir)
     if (!fs.existsSync(resolved)) return []
 
+    const t0 = Date.now()
     const files: FileInfo[] = []
-    const exts = extensions.map(e => e.toLowerCase())
+    const extSet = new Set(extensions.map(e => e.toLowerCase()))
 
     function scan(dirPath: string): void {
       const entries = fs.readdirSync(dirPath, { withFileTypes: true })
       for (const entry of entries) {
-        const fullPath = path.join(dirPath, entry.name)
         if (entry.isDirectory()) {
-          scan(fullPath)
-        } else if (entry.isFile()) {
-          const ext = path.extname(entry.name).toLowerCase()
-          if (exts.includes(ext)) {
-            const stat = fs.statSync(fullPath)
-            files.push({
-              name: entry.name,
-              path: fullPath,
-              size: stat.size,
-              mtime: stat.mtimeMs,
-            })
-          }
+          scan(path.join(dirPath, entry.name))
+        } else if (entry.isFile() && extSet.has(path.extname(entry.name).toLowerCase())) {
+          const fullPath = path.join(dirPath, entry.name)
+          const stat = fs.statSync(fullPath)
+          files.push({ name: entry.name, path: fullPath, size: stat.size, mtime: stat.mtimeMs })
         }
       }
     }
 
     scan(resolved)
-    return files.sort((a, b) => a.name.localeCompare(b.name))
+    files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    console.log(`[listFiles] ${files.length} files in ${Date.now() - t0}ms`)
+    return files
   })
 
   // Get file stats
@@ -111,13 +140,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const win = getMainWindow()
     if (!win || !fs.existsSync(resolved)) return
 
+    watcherMap.get(resolved)?.close()
+
     const watcher = fs.watch(resolved, { recursive: true }, (event, filename) => {
       if (filename) {
         win.webContents.send('folder-changed', { event, path: path.join(resolved, filename) })
       }
     })
-
-    // Store watcher so it can be cleaned up
     watcherMap.set(resolved, watcher)
   })
 
@@ -226,13 +255,16 @@ ipcMain.handle('python:call', async (_evt, action: string, args: unknown) => {
   const proc = getSidecar()
   proc.stdin!.write(JSON.stringify({ id, action, args }) + '\n')
   return new Promise((resolve, reject) => {
-    sidecarPending.set(id, { resolve, reject })
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       if (sidecarPending.has(id)) {
         sidecarPending.delete(id)
         reject(new Error('Python sidecar timeout (30 s)'))
       }
     }, 30_000)
+    sidecarPending.set(id, {
+      resolve: (v) => { clearTimeout(timer); resolve(v) },
+      reject:  (e) => { clearTimeout(timer); reject(e) },
+    })
   })
 })
 
@@ -242,6 +274,157 @@ export function cleanupSidecar(): void {
     sidecarProcess = null
   }
 }
+
+// ── Marimo notebook server ─────────────────────────────────────────────────────
+
+let marimoProc: ChildProcess | null = null
+let marimoPort: number | null = null
+const MARIMO_CONTEXT_PATH = path.join(app.getPath('userData'), 'marimo_context.json')
+const MARIMO_METRICS_PATH = path.join(app.getPath('userData'), 'marimo_metrics.csv')
+
+function findFreePort(start: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.listen(start, '127.0.0.1', () => {
+      const port = (server.address() as net.AddressInfo).port
+      server.close(() => resolve(port))
+    })
+    server.on('error', () => {
+      if (start >= 2800) reject(new Error('No free port found between 2718–2800'))
+      else findFreePort(start + 1).then(resolve, reject)
+    })
+  })
+}
+
+async function waitForMarimoReady(port: number, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/`, {
+        signal: AbortSignal.timeout(1000),
+      })
+      if (res.status < 500) return
+    } catch { /* not ready yet */ }
+    await new Promise(r => setTimeout(r, 500))
+  }
+  throw new Error('Marimo server did not start within 30 seconds')
+}
+
+function seedNotebook(nbPath: string): void {
+  if (fs.existsSync(nbPath)) return
+  fs.mkdirSync(path.dirname(nbPath), { recursive: true })
+  const content = `import marimo
+
+__generated_with = "0.11.0"
+app = marimo.App(width="medium")
+
+
+@app.cell
+def _():
+    import marimo as mo
+    import pandas as pd
+    import json
+    import os
+    return json, mo, os, pd
+
+
+@app.cell
+def _(json, mo, os, pd):
+    _context_path = ${JSON.stringify(MARIMO_CONTEXT_PATH)}
+    _metrics_path = ${JSON.stringify(MARIMO_METRICS_PATH)}
+
+    _ctx = json.load(open(_context_path)) if os.path.exists(_context_path) else {}
+    _df = pd.read_csv(_metrics_path) if os.path.exists(_metrics_path) else pd.DataFrame()
+
+    mo.vstack([
+        mo.md(f"## DesignCampaign — {len(_ctx.get('filtered_files', []))} filtered structures"),
+        mo.md(f"**Folder:** \`{_ctx.get('current_folder', 'N/A')}\`  |  "
+              f"**Active file:** \`{_ctx.get('active_file', 'N/A')}\`"),
+        mo.ui.table(_df) if not _df.empty else mo.md("_No metrics loaded yet — open a folder with metrics in DesignCampaign._"),
+    ])
+
+
+if __name__ == "__main__":
+    app.run()
+`
+  fs.writeFileSync(nbPath, content, 'utf-8')
+}
+
+ipcMain.handle('marimo:start', async (_evt, notebookPath: string) => {
+  if (marimoProc && marimoProc.exitCode === null && marimoPort !== null) {
+    return { port: marimoPort, contextPath: MARIMO_CONTEXT_PATH }
+  }
+
+  if (marimoProc) {
+    marimoProc.kill()
+    marimoProc = null
+    marimoPort = null
+  }
+
+  seedNotebook(notebookPath)
+
+  const port = await findFreePort(2718)
+  const pythonExe = getPythonExe()
+
+  marimoProc = spawn(
+    pythonExe,
+    ['-m', 'marimo', 'edit', '--headless', '--no-token', '--port', String(port), notebookPath],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  )
+
+  createInterface({ input: marimoProc.stderr! }).on('line', line => {
+    if (line.trim()) console.log('[marimo]', line)
+  })
+
+  marimoProc.on('exit', (code, signal) => {
+    console.log(`[marimo] process exited — code=${code} signal=${signal}`)
+    marimoProc = null
+    marimoPort = null
+  })
+
+  await waitForMarimoReady(port)
+  marimoPort = port
+  return { port, contextPath: MARIMO_CONTEXT_PATH }
+})
+
+ipcMain.handle('marimo:stop', () => {
+  if (marimoProc) {
+    marimoProc.kill()
+    marimoProc = null
+    marimoPort = null
+  }
+})
+
+ipcMain.handle('marimo:status', () => ({
+  running: marimoProc !== null && marimoProc.exitCode === null,
+  port: marimoPort,
+}))
+
+ipcMain.handle('marimo:update-context', async (_evt, context: MarimoUpdateContext) => {
+  fs.writeFileSync(MARIMO_CONTEXT_PATH, JSON.stringify(context, null, 2), 'utf-8')
+
+  const { metricsRows: rows } = context
+  if (rows.length > 0) {
+    const allCols = Array.from(new Set(rows.flatMap(r => Object.keys(r.metrics))))
+    const header = ['name', 'filePath', ...allCols].join(',')
+    const lines = rows.map(r => {
+      const vals = allCols.map(c => (r.metrics[c] === undefined ? '' : String(r.metrics[c])))
+      return [`"${r.name}"`, `"${r.filePath ?? ''}"`, ...vals].join(',')
+    })
+    fs.writeFileSync(MARIMO_METRICS_PATH, [header, ...lines].join('\n'), 'utf-8')
+  }
+
+  return { contextPath: MARIMO_CONTEXT_PATH, metricsPath: MARIMO_METRICS_PATH }
+})
+
+export function cleanupMarimo(): void {
+  if (marimoProc) {
+    marimoProc.kill()
+    marimoProc = null
+    marimoPort = null
+  }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 
