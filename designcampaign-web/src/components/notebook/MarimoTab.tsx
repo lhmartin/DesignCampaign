@@ -33,7 +33,10 @@ export function MarimoTab() {
         if (saved) {
           setNotebookPath(saved)
           setPathInput(saved)
-          startMarimo(saved)
+          startMarimo(saved).catch(err => {
+            setErrorMsg(err instanceof Error ? err.message : String(err))
+            setState('error')
+          })
         } else {
           const folder = useFileStore.getState().currentFolder
           if (folder) setPathInput(folder + '/notebook.py')

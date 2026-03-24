@@ -30,24 +30,26 @@ function pickDefaults(cols: string[]): [string, string] {
   return [cols[0], cols.length > 1 ? cols[1] : cols[0]]
 }
 
-// Compute pareto front indices (non-dominated set, maximise both axes)
+// Compute pareto front indices (non-dominated set) in O(n log n).
+// Sort by X descending (for maximise.x) then sweep, tracking best Y seen.
+// A point is on the front iff no prior point (better/equal X) also has better Y.
 function paretoFront(
   pts: { x: number; y: number }[],
   maximise: { x: boolean; y: boolean },
 ): Set<number> {
+  const indices = pts.map((_, i) => i).filter(i => isFinite(pts[i].x) && isFinite(pts[i].y))
+  // Sort so that the "best" X comes first
+  indices.sort((a, b) => maximise.x ? pts[b].x - pts[a].x : pts[a].x - pts[b].x)
+
   const front = new Set<number>()
-  for (let i = 0; i < pts.length; i++) {
-    let dominated = false
-    for (let j = 0; j < pts.length; j++) {
-      if (i === j) continue
-      const pi = pts[i], pj = pts[j]
-      const betterX = maximise.x ? pj.x >= pi.x : pj.x <= pi.x
-      const betterY = maximise.y ? pj.y >= pi.y : pj.y <= pi.y
-      const strictX = maximise.x ? pj.x > pi.x : pj.x < pi.x
-      const strictY = maximise.y ? pj.y > pi.y : pj.y < pi.y
-      if (betterX && betterY && (strictX || strictY)) { dominated = true; break }
+  let bestY = maximise.y ? -Infinity : Infinity
+
+  for (const i of indices) {
+    const y = pts[i].y
+    if (maximise.y ? y >= bestY : y <= bestY) {
+      front.add(i)
+      if (maximise.y ? y > bestY : y < bestY) bestY = y
     }
-    if (!dominated) front.add(i)
   }
   return front
 }
@@ -177,7 +179,10 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
 
   const plotRef = useRef<HTMLDivElement>(null)
 
-  const [plotType, setPlotType] = useState<PlotType>('scatter')
+  const [plotType, setPlotType] = useState<PlotType>(() => {
+    const saved = localStorage.getItem('dc-plot-type')
+    return (PLOT_TYPES.some(t => t.value === saved) ? saved : 'scatter') as PlotType
+  })
   const [xAxis, setXAxisRaw] = useState('')
   const [yAxis, setYAxisRaw] = useState('')
   const [xAuto, setXAuto] = useState(true)
@@ -602,7 +607,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
       }}>
         {/* Row 1: plot type + calculate */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px 4px', flexWrap: 'wrap' }}>
-          <PlotTypeSelector value={plotType} onChange={t => { setPlotType(t); setXAuto(true); setYAuto(true) }} />
+          <PlotTypeSelector value={plotType} onChange={t => { setPlotType(t); localStorage.setItem('dc-plot-type', t); setXAuto(true); setYAuto(true) }} />
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
             {isCalculating && (
               <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', fontFamily: 'JetBrains Mono, monospace' }}>

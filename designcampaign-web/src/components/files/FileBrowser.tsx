@@ -69,8 +69,15 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
   const hasSetupListeners = useRef(false)
   const lastGroupedFilesRef = useRef<typeof files | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [fileSearchInput, setFileSearchInput] = useState('')
   const [fileSearch, setFileSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // Debounce search input to avoid filtering 10k+ files on every keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setFileSearch(fileSearchInput), 150)
+    return () => clearTimeout(t)
+  }, [fileSearchInput])
 
   const FILE_LIMIT = 100
 
@@ -192,13 +199,13 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
             <Search size={11} className="text-[var(--color-text-disabled)] shrink-0" />
             <input
               ref={searchRef}
-              value={fileSearch}
-              onChange={e => setFileSearch(e.target.value)}
+              value={fileSearchInput}
+              onChange={e => setFileSearchInput(e.target.value)}
               placeholder="Search files…"
               className="flex-1 bg-transparent text-xs text-[var(--color-text-primary)] placeholder:text-[var(--color-text-disabled)] outline-none min-w-0"
             />
-            {fileSearch && (
-              <button onClick={() => setFileSearch('')} className="text-[var(--color-text-disabled)] hover:text-[var(--color-text-secondary)]">
+            {fileSearchInput && (
+              <button onClick={() => setFileSearchInput('')} className="text-[var(--color-text-disabled)] hover:text-[var(--color-text-secondary)]">
                 <X size={11} />
               </button>
             )}
@@ -244,7 +251,7 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
             <div className="flex-1 overflow-y-auto">
               {searchResults.shown.length === 0 && (
                 <div className="flex items-center justify-center h-20 text-xs text-[var(--color-text-disabled)] px-4 text-center">
-                  No files match "{fileSearch}"
+                  No files match "{fileSearchInput}"
                 </div>
               )}
               {searchResults.shown.map(file => (

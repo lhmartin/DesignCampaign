@@ -122,7 +122,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     }
 
     scan(resolved)
-    files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    files.sort((a, b) => a.name.localeCompare(b.name))
     console.log(`[listFiles] ${files.length} files in ${Date.now() - t0}ms`)
     return files
   })
@@ -285,9 +285,11 @@ const MARIMO_METRICS_PATH = path.join(app.getPath('userData'), 'marimo_metrics.c
 function findFreePort(start: number): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer()
+    // Listen without closing — caller must close the server after spawning to
+    // release the port. This prevents the race where another process claims the
+    // port in the window between close() and spawn().
     server.listen(start, '127.0.0.1', () => {
-      const port = (server.address() as net.AddressInfo).port
-      server.close(() => resolve(port))
+      resolve((server.address() as net.AddressInfo).port)
     })
     server.on('error', () => {
       if (start >= 2800) reject(new Error('No free port found between 2718–2800'))
@@ -330,11 +332,11 @@ def _():
 
 @app.cell
 def _(json, mo, os, pd):
-    _context_path = ${JSON.stringify(MARIMO_CONTEXT_PATH)}
-    _metrics_path = ${JSON.stringify(MARIMO_METRICS_PATH)}
+    _context_path = os.environ.get("DESIGNCAMPAIGN_CONTEXT_PATH", "")
+    _metrics_path = os.environ.get("DESIGNCAMPAIGN_METRICS_PATH", "")
 
-    _ctx = json.load(open(_context_path)) if os.path.exists(_context_path) else {}
-    _df = pd.read_csv(_metrics_path) if os.path.exists(_metrics_path) else pd.DataFrame()
+    _ctx = json.load(open(_context_path)) if _context_path and os.path.exists(_context_path) else {}
+    _df = pd.read_csv(_metrics_path) if _metrics_path and os.path.exists(_metrics_path) else pd.DataFrame()
 
     mo.vstack([
         mo.md(f"## DesignCampaign — {len(_ctx.get('filtered_files', []))} filtered structures"),
@@ -363,13 +365,38 @@ ipcMain.handle('marimo:start', async (_evt, notebookPath: string) => {
 
   seedNotebook(notebookPath)
 
-  const port = await findFreePort(2718)
+  // Hold a listening server on the chosen port to prevent race-condition
+  // port theft between discovery and Marimo's bind.
+  const portServer = net.createServer()
+  const port = await new Promise<number>((resolve, reject) => {
+    portServer.once('listening', () => resolve((portServer.address() as net.AddressInfo).port))
+    portServer.once('error', reject)
+    portServer.listen(0, '127.0.0.1') // 0 = OS-assigned free port
+  })
+  // Release the port just before spawning so Marimo can bind it
+  await new Promise<void>(r => portServer.close(() => r()))
+
   const pythonExe = getPythonExe()
 
   marimoProc = spawn(
     pythonExe,
     ['-m', 'marimo', 'edit', '--headless', '--no-token', '--port', String(port), notebookPath],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // Only expose safe env vars — avoid leaking API keys or secrets.
+      // Cast via spread so TS's ProcessEnv augmentation doesn't complain.
+      env: {
+        ...({} as NodeJS.ProcessEnv),
+        PATH: process.env['PATH'],
+        HOME: process.env['HOME'],
+        USERPROFILE: process.env['USERPROFILE'],
+        APPDATA: process.env['APPDATA'],
+        TEMP: process.env['TEMP'],
+        TMPDIR: process.env['TMPDIR'],
+        DESIGNCAMPAIGN_CONTEXT_PATH: MARIMO_CONTEXT_PATH,
+        DESIGNCAMPAIGN_METRICS_PATH: MARIMO_METRICS_PATH,
+      } satisfies NodeJS.ProcessEnv,
+    },
   )
 
   createInterface({ input: marimoProc.stderr! }).on('line', line => {
@@ -400,8 +427,19 @@ ipcMain.handle('marimo:status', () => ({
   port: marimoPort,
 }))
 
+// RFC 4180: wrap in double-quotes and escape internal quotes by doubling them.
+function csvCell(v: string): string {
+  return `"${v.replace(/"/g, '""')}"`
+}
+
+const CONTEXT_MAX_BYTES = 50 * 1024 * 1024 // 50 MB guard
+
 ipcMain.handle('marimo:update-context', async (_evt, context: MarimoUpdateContext) => {
-  fs.writeFileSync(MARIMO_CONTEXT_PATH, JSON.stringify(context, null, 2), 'utf-8')
+  const serialised = JSON.stringify(context, null, 2)
+  if (Buffer.byteLength(serialised, 'utf-8') > CONTEXT_MAX_BYTES) {
+    throw new Error('marimo:update-context payload exceeds 50 MB limit')
+  }
+  fs.writeFileSync(MARIMO_CONTEXT_PATH, serialised, 'utf-8')
 
   const { metricsRows: rows } = context
   if (rows.length > 0) {
@@ -409,7 +447,7 @@ ipcMain.handle('marimo:update-context', async (_evt, context: MarimoUpdateContex
     const header = ['name', 'filePath', ...allCols].join(',')
     const lines = rows.map(r => {
       const vals = allCols.map(c => (r.metrics[c] === undefined ? '' : String(r.metrics[c])))
-      return [`"${r.name}"`, `"${r.filePath ?? ''}"`, ...vals].join(',')
+      return [csvCell(r.name), csvCell(r.filePath ?? ''), ...vals].join(',')
     })
     fs.writeFileSync(MARIMO_METRICS_PATH, [header, ...lines].join('\n'), 'utf-8')
   }
