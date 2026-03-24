@@ -29,3 +29,7 @@ dist/
 dist-electron/
 test-results/
 e2e/report/
+
+# Marimo session files and generated notebooks
+__marimo__/
+notebook.py
