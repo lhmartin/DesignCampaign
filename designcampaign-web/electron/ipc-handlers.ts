@@ -1,8 +1,9 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow, safeStorage, app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import Anthropic from '@anthropic-ai/sdk'
 import { isEnvReady, getPythonExe, getSidecarScriptPath, runSetup } from './python-setup'
 
 export interface FileInfo {
@@ -126,6 +127,42 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     if (watcher) {
       watcher.close()
       watcherMap.delete(resolved)
+    }
+  })
+
+  // ── Claude API ────────────────────────────────────────────────────────────
+
+  const claudeKeyPath = path.join(app.getPath('userData'), 'claude-key.enc')
+  let claudeClient: Anthropic | null = null  // cached; reset when key changes
+
+  ipcMain.handle('claude:set-key', async (_e, apiKey: string) => {
+    const encrypted = safeStorage.encryptString(apiKey)
+    fs.writeFileSync(claudeKeyPath, encrypted)
+    claudeClient = new Anthropic({ apiKey })   // prime cache immediately
+    return { ok: true }
+  })
+
+  ipcMain.handle('claude:key-status', async () => ({
+    configured: fs.existsSync(claudeKeyPath),
+  }))
+
+  ipcMain.handle('claude:chat', async (_e, messages: unknown, system: string, tools: unknown) => {
+    if (!claudeClient) {
+      const encrypted = fs.readFileSync(claudeKeyPath)
+      claudeClient = new Anthropic({ apiKey: safeStorage.decryptString(encrypted) })
+    }
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 60_000)
+    try {
+      return await claudeClient.messages.create({
+        model: 'claude-opus-4-6',
+        max_tokens: 4096,
+        system,
+        tools: tools as Anthropic.Tool[],
+        messages: messages as Anthropic.MessageParam[],
+      }, { signal: controller.signal })
+    } finally {
+      clearTimeout(timeout)
     }
   })
 

@@ -18,10 +18,14 @@ export function getFileFormat(filePath: string): 'pdb' | 'mmcif' {
   return lower.endsWith('.cif') || lower.endsWith('.mmcif') ? 'mmcif' : 'pdb'
 }
 
+/** Extract filename (with extension) from a posix or windows path */
+export function getFileName(filePath: string): string {
+  return filePath.split('/').pop()?.split('\\').pop() ?? filePath
+}
+
 /** Extract filename stem (no extension) */
 export function getFileStem(filePath: string): string {
-  const name = filePath.split('/').pop()?.split('\\').pop() ?? filePath
-  return name.replace(/\.[^.]+$/, '')
+  return getFileName(filePath).replace(/\.[^.]+$/, '')
 }
 
 /** Trigger a browser download for a string payload. */

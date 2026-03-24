@@ -34,6 +34,11 @@ export interface ElectronAPI {
   onUpdateDownloaded(callback: () => void): () => void
   installUpdate(): void
 
+  // Claude API
+  claudeSetKey(apiKey: string): Promise<{ ok: boolean }>
+  claudeKeyStatus(): Promise<{ configured: boolean }>
+  claudeChat(messages: unknown, system: string, tools: unknown): Promise<unknown>
+
   // Python sidecar
   pythonCall(action: string, args: unknown): Promise<unknown>
   pythonSetupStatus(): Promise<{ ready: boolean }>

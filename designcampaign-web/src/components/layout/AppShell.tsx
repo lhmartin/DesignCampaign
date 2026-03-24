@@ -1,17 +1,17 @@
 import { useRef, useState, useEffect } from 'react'
 import { useDefaultLayout } from 'react-resizable-panels'
-import { FolderOpen, Table2, ScatterChart, Grid2x2, GitMerge, SlidersHorizontal, MousePointer2, Database, Sun, Moon } from 'lucide-react'
+import { FolderOpen, Table2, ScatterChart, GitMerge, SlidersHorizontal, MousePointer2, Database, Sun, Moon, MessageSquare } from 'lucide-react'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { FileBrowser } from '@/components/files/FileBrowser'
 import { MolstarViewer, type MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
 import { MetricsTable } from '@/components/metrics/MetricsTable'
 import { ScatterPlot } from '@/components/metrics/ScatterPlot'
-import { CorrelationHeatmap } from '@/components/metrics/CorrelationHeatmap'
 import { AlignmentViewer } from '@/components/metrics/AlignmentViewer'
 import { SelectionPanel } from '@/components/selection/SelectionPanel'
 import { FilterPanel } from '@/components/filter/FilterPanel'
 import { UniProtPanel } from '@/components/metrics/UniProtPanel'
+import { ChatPanel } from '@/components/chat/ChatPanel'
 import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { UpdateBanner } from './UpdateBanner'
@@ -172,12 +172,12 @@ export function AppShell() {
                 <TabsTrigger value="files"><FolderOpen size={12} strokeWidth={1.75} />Files</TabsTrigger>
                 <TabsTrigger value="metrics"><Table2 size={12} strokeWidth={1.75} />Metrics</TabsTrigger>
                 <TabsTrigger value="plot"><ScatterChart size={12} strokeWidth={1.75} />Plot</TabsTrigger>
-                <TabsTrigger value="corr"><Grid2x2 size={12} strokeWidth={1.75} />Corr</TabsTrigger>
                 <TabsTrigger value="alignment"><GitMerge size={12} strokeWidth={1.75} />Align</TabsTrigger>
                 <TabsTrigger value="filter"><SlidersHorizontal size={12} strokeWidth={1.75} />Filter</TabsTrigger>
                 <span style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px', flexShrink: 0 }} />
                 <TabsTrigger value="selection"><MousePointer2 size={12} strokeWidth={1.75} />Selection</TabsTrigger>
                 <TabsTrigger value="uniprot"><Database size={12} strokeWidth={1.75} />UniProt</TabsTrigger>
+                <TabsTrigger value="chat"><MessageSquare size={12} strokeWidth={1.75} />Chat</TabsTrigger>
               </TabsList>
 
               <TabsContent value="files">
@@ -190,10 +190,6 @@ export function AppShell() {
 
               <TabsContent value="plot" forceMount>
                 <ScatterPlot viewerRef={viewerRef} />
-              </TabsContent>
-
-              <TabsContent value="corr" forceMount>
-                <CorrelationHeatmap />
               </TabsContent>
 
               <TabsContent value="alignment">
@@ -210,6 +206,10 @@ export function AppShell() {
 
               <TabsContent value="uniprot">
                 <UniProtPanel />
+              </TabsContent>
+
+              <TabsContent value="chat">
+                <ChatPanel />
               </TabsContent>
             </Tabs>
           </div>
