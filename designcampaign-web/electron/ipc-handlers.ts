@@ -279,24 +279,10 @@ export function cleanupSidecar(): void {
 
 let marimoProc: ChildProcess | null = null
 let marimoPort: number | null = null
+const isMarimoRunning = () => marimoProc !== null && marimoProc.exitCode === null
 const MARIMO_CONTEXT_PATH = path.join(app.getPath('userData'), 'marimo_context.json')
 const MARIMO_METRICS_PATH = path.join(app.getPath('userData'), 'marimo_metrics.csv')
 
-function findFreePort(start: number): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer()
-    // Listen without closing — caller must close the server after spawning to
-    // release the port. This prevents the race where another process claims the
-    // port in the window between close() and spawn().
-    server.listen(start, '127.0.0.1', () => {
-      resolve((server.address() as net.AddressInfo).port)
-    })
-    server.on('error', () => {
-      if (start >= 2800) reject(new Error('No free port found between 2718–2800'))
-      else findFreePort(start + 1).then(resolve, reject)
-    })
-  })
-}
 
 async function waitForMarimoReady(port: number, timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
@@ -358,7 +344,7 @@ if __name__ == "__main__":
 }
 
 ipcMain.handle('marimo:start', async (_evt, notebookPath: string) => {
-  if (marimoProc && marimoProc.exitCode === null && marimoPort !== null) {
+  if (isMarimoRunning() && marimoPort !== null) {
     return { port: marimoPort, contextPath: MARIMO_CONTEXT_PATH }
   }
 
@@ -428,7 +414,7 @@ ipcMain.handle('marimo:stop', () => {
 })
 
 ipcMain.handle('marimo:status', () => ({
-  running: marimoProc !== null && marimoProc.exitCode === null,
+  running: isMarimoRunning(),
   port: marimoPort,
 }))
 

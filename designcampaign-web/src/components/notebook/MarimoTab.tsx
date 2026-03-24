@@ -18,7 +18,11 @@ export function MarimoTab() {
   const currentFolder = useFileStore(s => s.currentFolder)
   const [pathInput, setPathInput] = useState('')
   const installLogRef = useRef<HTMLDivElement>(null)
+  const installCleanupRef = useRef<(() => void) | null>(null)
   const { contextPath } = useMarimoContext()
+
+  // Clean up install progress listener if component unmounts mid-install
+  useEffect(() => () => { installCleanupRef.current?.() }, [])
 
   useEffect(() => {
     if (!window.electronAPI) return
@@ -104,15 +108,18 @@ export function MarimoTab() {
 
     const cleanup = window.electronAPI.onMarimoInstallProgress(msg => {
       if (msg.done) {
+        installCleanupRef.current = null
         cleanup()
         startMarimo(nbPath)
       } else if (msg.message) {
         setInstallLog(prev => [...prev, msg.message!])
       }
     })
+    installCleanupRef.current = cleanup
 
     const result = await window.electronAPI.marimoInstall()
     if (!result.ok) {
+      installCleanupRef.current = null
       cleanup()
       setErrorMsg(result.error ?? 'Installation failed')
       setState('error')
