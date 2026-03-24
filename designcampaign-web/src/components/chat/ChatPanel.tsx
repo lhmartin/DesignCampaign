@@ -8,12 +8,44 @@ import { executeTool } from '@/lib/claude-tool-executor'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Convert display messages to Anthropic API message params */
+/**
+ * Convert display messages back to Anthropic API message params.
+ * Assistant messages with tool calls expand into two API messages:
+ *   1. { role:'assistant', content: [text?, ...tool_use blocks] }
+ *   2. { role:'user',      content: [...tool_result blocks] }
+ * This preserves the full agentic context across multi-turn conversations.
+ */
 function toApiMessages(messages: ReturnType<typeof useClaudeStore.getState>['messages']): Anthropic.MessageParam[] {
-  return messages.map(m => ({
-    role: m.role,
-    content: m.text || (m.role === 'assistant' ? '…' : ''),
-  }))
+  const out: Anthropic.MessageParam[] = []
+  for (const m of messages) {
+    if (m.role === 'user') {
+      out.push({ role: 'user', content: m.text || '' })
+      continue
+    }
+    // Assistant message
+    const hasCalls = (m.toolCalls ?? []).length > 0
+    if (!hasCalls) {
+      out.push({ role: 'assistant', content: m.text || '…' })
+      continue
+    }
+    // Build mixed content block: optional text + tool_use blocks
+    const content: Anthropic.ContentBlockParam[] = []
+    if (m.text) content.push({ type: 'text', text: m.text })
+    for (const tc of m.toolCalls ?? []) {
+      content.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input as Record<string, unknown> })
+    }
+    out.push({ role: 'assistant', content })
+    // Follow with tool results as a user message
+    out.push({
+      role: 'user',
+      content: (m.toolCalls ?? []).map(tc => ({
+        type: 'tool_result' as const,
+        tool_use_id: tc.id,
+        content: JSON.stringify(tc.result ?? null),
+      })),
+    })
+  }
+  return out
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────

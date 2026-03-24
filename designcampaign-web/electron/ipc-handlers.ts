@@ -151,13 +151,19 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       const encrypted = fs.readFileSync(claudeKeyPath)
       claudeClient = new Anthropic({ apiKey: safeStorage.decryptString(encrypted) })
     }
-    return claudeClient.messages.create({
-      model: 'claude-opus-4-6',
-      max_tokens: 4096,
-      system,
-      tools: tools as Anthropic.Tool[],
-      messages: messages as Anthropic.MessageParam[],
-    })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 60_000)
+    try {
+      return await claudeClient.messages.create({
+        model: 'claude-opus-4-6',
+        max_tokens: 4096,
+        system,
+        tools: tools as Anthropic.Tool[],
+        messages: messages as Anthropic.MessageParam[],
+      }, { signal: controller.signal })
+    } finally {
+      clearTimeout(timeout)
+    }
   })
 
   ipcMain.handle('python:setup-status', () => {

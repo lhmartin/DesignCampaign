@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { useFileStore } from '@/stores/file-store'
 import { useMetricsStore } from '@/stores/metrics-store'
-import { useFilterStore } from '@/stores/filter-store'
+import { useFilterStore, type NumericFilterRule } from '@/stores/filter-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { getFileName } from '@/lib/utils'
 
@@ -119,7 +119,7 @@ export function buildSystemPrompt(): string {
   const activeLine = activeFile ? `Active structure: ${getFileName(activeFile)}` : 'No structure loaded.'
   const columnsLine = allColumns.length > 0 ? `Available metric columns: ${allColumns.join(', ')}` : 'No metrics computed yet.'
   const filtersLine = rules.length > 0
-    ? `Active filters (${rules.length}): ${rules.filter(r => r.type === 'numeric').map(r => `${(r as { metric: string }).metric} ${(r as { op: string }).op} ${(r as { value: number }).value}`).join('; ')}`
+    ? `Active filters (${rules.length}): ${rules.filter((r): r is NumericFilterRule => r.type === 'numeric').map(r => `${r.metric} ${r.op} ${r.value}`).join('; ')}`
     : 'No active filters.'
   const rankingLine = rankingMetrics.filter(m => m.active).length > 0
     ? `Ranking (${rankingMode}): ${rankingMetrics.filter(m => m.active).map(m => `${m.metric} ${m.direction}`).join(', ')}`

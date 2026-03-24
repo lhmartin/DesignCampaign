@@ -7,11 +7,12 @@ Star-alignment of binder sequences across all loaded structures. Chemical (Clust
 
 ---
 
-### Metric Correlation Heatmap
-A new **Corr** tab: NxN Pearson correlation matrix of all visible numeric columns rendered as a Plotly heatmap (RdBu diverging scale, −1 → +1). Respects hidden columns and active filters. Pure JS — no new dependencies.
+### ~~Metric Correlation Heatmap~~ *(deferred — hidden from UI)*
+An NxN Pearson correlation matrix of all visible numeric columns (RdBu diverging scale, −1 → +1). Respects hidden columns and active filters. Component is implemented but the tab is hidden until there's enough user demand and interactivity (e.g. click a cell to highlight correlated rows) to justify the screen real estate.
 
-- `src/components/metrics/CorrelationHeatmap.tsx` (new)
-- `src/components/layout/AppShell.tsx` — add Corr tab
+To re-enable: restore `TabsTrigger` (Grid2x2, value="corr") and `TabsContent` (forceMount, value="corr") in `AppShell.tsx` and re-import `CorrelationHeatmap`.
+
+- `src/components/metrics/CorrelationHeatmap.tsx` ✅ (exists, unused)
 
 ---
 
