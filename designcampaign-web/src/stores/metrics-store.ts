@@ -213,44 +213,44 @@ export const useMetricsStore = create<MetricsStore>()(
   })),
 
   // ── Calculate from PDB B-factors ─────────────────────────────────────────
-  // Process ONE file at a time and yield the event loop between each so the
-  // UI (progress bar, responsiveness) stays live throughout.  A batch-of-20
-  // approach caused 200–300 ms main-thread blocks because all synchronous
-  // PDB parses ran back-to-back after their reads resolved together.
+  // Read files in parallel batches of 8 to overlap I/O, then parse
+  // synchronously and yield once per batch. Upsert only the new batch
+  // results each iteration to keep store updates O(N) total.
   calculateAll: async (files, readFile) => {
     set({ isCalculating: true, progress: 0 })
-    const results: ProteinMetrics[] = []
-    // Batch sequence updates — merged once after the loop (O(N) instead of O(N²) Map copies)
+    const BATCH = 8
     const seqBatch = new Map<string, import('@/stores/sequence-store').ChainSeq[]>()
 
-    for (let i = 0; i < files.length; i++) {
-      try {
-        const content = await readFile(files[i].path)
-        const m = extractMetricsFromPDB(content)
-        const name = getFileStem(files[i].name)
-        results.push({
-          name,
-          filePath: files[i].path,
-          metrics: m as unknown as Record<string, number>,
-        })
-        // Collect sequences keyed by filePath — avoids name-mismatch when sidecar
-        // JSON overrides the display name before calculateAll runs.
-        const chainData = parseChainSequences(content)
-        seqBatch.set(files[i].path, Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence })))
-      } catch { /* skip unreadable files */ }
+    for (let i = 0; i < files.length; i += BATCH) {
+      const batch    = files.slice(i, i + BATCH)
+      const contents = await Promise.all(batch.map(f => readFile(f.path).catch(() => null)))
 
-      // Push incremental update and yield to event loop every file
-      set(s => ({
-        rows: upsertRows(s.rows, results),
-        allColumns: mergeColumns(s.allColumns, BUILTIN_COLS),
-        progress: (i + 1) / files.length,
-      }))
+      const batchResults: ProteinMetrics[] = []
+      for (let j = 0; j < batch.length; j++) {
+        const content = contents[j]
+        if (!content) continue
+        try {
+          const m    = extractMetricsFromPDB(content)
+          const name = getFileStem(batch[j].name)
+          batchResults.push({ name, filePath: batch[j].path, metrics: m as unknown as Record<string, number> })
+          const chainData = parseChainSequences(content)
+          seqBatch.set(batch[j].path, Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence })))
+        } catch { /* skip unreadable files */ }
+      }
+
+      if (batchResults.length > 0) {
+        set(s => ({
+          rows: upsertRows(s.rows, batchResults),
+          allColumns: mergeColumns(s.allColumns, BUILTIN_COLS),
+          progress: Math.min(i + BATCH, files.length) / files.length,
+        }))
+      } else {
+        set({ progress: Math.min(i + BATCH, files.length) / files.length })
+      }
       await new Promise(r => setTimeout(r, 0))
     }
 
-    // Single O(N) merge — one Map copy for all N structures
     if (seqBatch.size > 0) useSequenceStore.getState().mergeSequences(seqBatch)
-
     set({ isCalculating: false, progress: 1 })
   },
 
