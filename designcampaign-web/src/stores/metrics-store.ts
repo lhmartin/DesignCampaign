@@ -219,39 +219,42 @@ export const useMetricsStore = create<MetricsStore>()(
   calculateAll: async (files, readFile) => {
     set({ isCalculating: true, progress: 0 })
     const BATCH = 8
-    const seqBatch = new Map<string, import('@/stores/sequence-store').ChainSeq[]>()
+    try {
+      for (let i = 0; i < files.length; i += BATCH) {
+        const batch    = files.slice(i, i + BATCH)
+        const contents = await Promise.all(batch.map(f => readFile(f.path).catch(() => null)))
 
-    for (let i = 0; i < files.length; i += BATCH) {
-      const batch    = files.slice(i, i + BATCH)
-      const contents = await Promise.all(batch.map(f => readFile(f.path).catch(() => null)))
+        const batchResults: ProteinMetrics[] = []
+        const seqBatch = new Map<string, import('@/stores/sequence-store').ChainSeq[]>()
+        for (let j = 0; j < batch.length; j++) {
+          const content = contents[j]
+          if (!content) continue
+          try {
+            const m    = extractMetricsFromPDB(content)
+            const name = getFileStem(batch[j].name)
+            batchResults.push({ name, filePath: batch[j].path, metrics: m as unknown as Record<string, number> })
+            const chainData = parseChainSequences(content)
+            seqBatch.set(batch[j].path, Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence })))
+          } catch { /* skip unreadable files */ }
+        }
 
-      const batchResults: ProteinMetrics[] = []
-      for (let j = 0; j < batch.length; j++) {
-        const content = contents[j]
-        if (!content) continue
-        try {
-          const m    = extractMetricsFromPDB(content)
-          const name = getFileStem(batch[j].name)
-          batchResults.push({ name, filePath: batch[j].path, metrics: m as unknown as Record<string, number> })
-          const chainData = parseChainSequences(content)
-          seqBatch.set(batch[j].path, Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence })))
-        } catch { /* skip unreadable files */ }
+        // Flush sequences per-batch so we don't hold all 10k in memory at once
+        if (seqBatch.size > 0) useSequenceStore.getState().mergeSequences(seqBatch)
+
+        if (batchResults.length > 0) {
+          set(s => ({
+            rows: upsertRows(s.rows, batchResults),
+            allColumns: mergeColumns(s.allColumns, BUILTIN_COLS),
+            progress: Math.min(i + BATCH, files.length) / files.length,
+          }))
+        } else {
+          set({ progress: Math.min(i + BATCH, files.length) / files.length })
+        }
+        await new Promise(r => setTimeout(r, 0))
       }
-
-      if (batchResults.length > 0) {
-        set(s => ({
-          rows: upsertRows(s.rows, batchResults),
-          allColumns: mergeColumns(s.allColumns, BUILTIN_COLS),
-          progress: Math.min(i + BATCH, files.length) / files.length,
-        }))
-      } else {
-        set({ progress: Math.min(i + BATCH, files.length) / files.length })
-      }
-      await new Promise(r => setTimeout(r, 0))
+    } finally {
+      set({ isCalculating: false, progress: 1 })
     }
-
-    if (seqBatch.size > 0) useSequenceStore.getState().mergeSequences(seqBatch)
-    set({ isCalculating: false, progress: 1 })
   },
 
   // ── Auto-load JSON sidecars ───────────────────────────────────────────────
@@ -259,7 +262,7 @@ export const useMetricsStore = create<MetricsStore>()(
     set({ isLoadingSidecars: true })
     const BATCH = 10
     let loaded = 0
-
+    try {
     for (let i = 0; i < files.length; i += BATCH) {
       const batch = files.slice(i, i + BATCH)
       const results: ProteinMetrics[] = []
@@ -301,8 +304,9 @@ export const useMetricsStore = create<MetricsStore>()(
 
       await new Promise(r => setTimeout(r, 0))
     }
-
-    set({ isLoadingSidecars: false })
+    } finally {
+      set({ isLoadingSidecars: false })
+    }
     return loaded
   },
 
