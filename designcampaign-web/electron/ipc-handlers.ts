@@ -331,18 +331,23 @@ def _():
 
 
 @app.cell
-def _(json, mo, os, pd):
+def _(json, os, pd):
+    # ctx  — full app state (active_file, current_folder, filtered_files, filters, ranking)
+    # df   — metrics table matching what DesignCampaign shows (name, filePath, all numeric columns)
     _context_path = os.environ.get("DESIGNCAMPAIGN_CONTEXT_PATH", "")
     _metrics_path = os.environ.get("DESIGNCAMPAIGN_METRICS_PATH", "")
+    ctx = json.load(open(_context_path)) if _context_path and os.path.exists(_context_path) else {}
+    df = pd.read_csv(_metrics_path) if _metrics_path and os.path.exists(_metrics_path) else pd.DataFrame()
+    return ctx, df
 
-    _ctx = json.load(open(_context_path)) if _context_path and os.path.exists(_context_path) else {}
-    _df = pd.read_csv(_metrics_path) if _metrics_path and os.path.exists(_metrics_path) else pd.DataFrame()
 
+@app.cell
+def _(ctx, df, mo):
     mo.vstack([
-        mo.md(f"## DesignCampaign — {len(_ctx.get('filtered_files', []))} filtered structures"),
-        mo.md(f"**Folder:** \`{_ctx.get('current_folder', 'N/A')}\`  |  "
-              f"**Active file:** \`{_ctx.get('active_file', 'N/A')}\`"),
-        mo.ui.table(_df) if not _df.empty else mo.md("_No metrics loaded yet — open a folder with metrics in DesignCampaign._"),
+        mo.md(f"## DesignCampaign — {len(ctx.get('filtered_files', []))} filtered structures"),
+        mo.md(f"**Folder:** \`{ctx.get('current_folder', 'N/A')}\`  |  "
+              f"**Active file:** \`{ctx.get('active_file', 'N/A')}\`"),
+        mo.ui.table(df) if not df.empty else mo.md("_No metrics loaded yet — open a folder with metrics in DesignCampaign._"),
     ])
 
 
