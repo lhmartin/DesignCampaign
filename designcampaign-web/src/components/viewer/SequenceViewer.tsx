@@ -4,8 +4,8 @@ import { residueColor, HYDROPHOBICITY_SCALE } from '@/lib/sequence'
 import { lerpColor } from '@/lib/constants/colors'
 import { useSelectionStore } from '@/stores/selection-store'
 import { syncToMolstar } from '@/lib/mol-selection-sync'
-import { useAntpackStore, CDR_CONFIDENCE_THRESHOLDS } from '@/stores/antpack-store'
-import type { CdrRegionName, CdrConfidenceFilter } from '@/stores/antpack-store'
+import { useAntpackStore, CDR_CONFIDENCE_THRESHOLDS, REGION_COLORS, buildCdrSpans } from '@/stores/antpack-store'
+import type { CdrRegionName, CdrConfidenceFilter, CdrSpan } from '@/stores/antpack-store'
 import { useRmsdStore } from '@/stores/rmsd-store'
 import { useNamedSelectionStore } from '@/stores/named-selection-store'
 
@@ -27,43 +27,6 @@ const CHAIN_PILL_W = 36   // px width reserved for chain label
 // ─── Color mode ───────────────────────────────────────────────────────────────
 type ColorMode = 'none' | 'chemical' | 'hydrophobicity' | 'plddt' | 'rmsd'
 
-// ─── CDR annotation track colors ──────────────────────────────────────────────
-const REGION_COLORS: Record<CdrRegionName, { bg: string; fg: string }> = {
-  CDR1: { bg: 'var(--color-cdr1)', fg: 'var(--color-cdr1-fg)' },
-  CDR2: { bg: 'var(--color-cdr2)', fg: 'var(--color-cdr2-fg)' },
-  CDR3: { bg: 'var(--color-cdr3)', fg: 'var(--color-cdr3-fg)' },
-  FW1:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
-  FW2:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
-  FW3:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
-  FW4:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
-}
-
-// ─── CDR span helpers ─────────────────────────────────────────────────────────
-
-interface CdrSpan {
-  region: CdrRegionName
-  startIdx: number  // inclusive, 0-indexed into chain residues
-  endIdx:   number  // inclusive
-}
-
-/** Group consecutive same-region assignments into contiguous spans. */
-function buildCdrSpans(assignments: (CdrRegionName | null)[]): CdrSpan[] {
-  const spans: CdrSpan[] = []
-  let cur: CdrSpan | null = null
-  for (let i = 0; i < assignments.length; i++) {
-    const r = assignments[i]
-    if (r === null) {
-      if (cur) { spans.push(cur); cur = null }
-    } else if (cur && cur.region === r) {
-      cur.endIdx = i
-    } else {
-      if (cur) spans.push(cur)
-      cur = { region: r, startIdx: i, endIdx: i }
-    }
-  }
-  if (cur) spans.push(cur)
-  return spans
-}
 
 /** Left-edge pixel of residue i within a display row, accounting for chunk gaps. */
 function resX(i: number): number {

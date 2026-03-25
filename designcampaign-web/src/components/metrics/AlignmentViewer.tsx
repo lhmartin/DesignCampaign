@@ -11,6 +11,12 @@ import {
   columnConservation, conservationColor,
 } from '@/lib/alignment/alignment-colors'
 import type { MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
+import { useAntpackStore, CDR_CONFIDENCE_THRESHOLDS, REGION_COLORS, buildCdrSpans } from '@/stores/antpack-store'
+import type { CdrRegionName, ChainCdrAnnotation } from '@/stores/antpack-store'
+
+// Stable empty map — returned by the antpack selector when CDR track is off so
+// Zustand doesn't trigger re-renders for annotation changes we don't care about.
+const EMPTY_ANNOTATIONS = new Map<string, ChainCdrAnnotation[]>()
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 
@@ -19,6 +25,7 @@ const CELL_H = 16   // px per sequence row
 const NAME_W = 112  // px for the sticky row-name label
 const NUM_H  = 11   // px for the position-number sticky header
 const CONS_H = 5    // px for conservation bar
+const CDR_H  = 13   // px for CDR/FW annotation track
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -61,15 +68,16 @@ function buildSeqCounts(
 function pickBinderChain(
   chains: { chain: string; seq: string }[],
   seqCounts: Map<string, number>,
-): string | null {
+): { seq: string; chainId: string } | null {
   const eligible = chains.filter(c => c.seq.length >= 4)
   if (eligible.length === 0) return null
-  return eligible.reduce((best, c) => {
+  const winner = eligible.reduce((best, c) => {
     const bc = seqCounts.get(best.seq) ?? 0
     const cc = seqCounts.get(c.seq) ?? 0
     if (cc !== bc) return cc < bc ? c : best   // lower count = more unique = binder
     return c.seq.length < best.seq.length ? c : best  // shorter wins on tie
-  }).seq
+  })
+  return { seq: winner.seq, chainId: winner.chain }
 }
 
 // ── Legend data ───────────────────────────────────────────────────────────────
@@ -248,6 +256,7 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
   const { files, setActiveFile }         = useFileStore()
   const isDark                           = useIsDark()
   const [colorMode, setColorMode]        = useState<ColorMode>('chemical')
+  const [showCdrTrack, setShowCdrTrack]  = useState(false)
 
   const activeRows = useActiveRows(rows, filterText, filterRules)
 
@@ -255,23 +264,59 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
   // Two-pass: first count how often each sequence appears across all structures
   // (the shared target scores high; the unique binder scores 1), then per structure
   // pick the chain with the lowest count (= most likely binder).
-  const { aligned, names, conservation } = useMemo(() => {
+  const { aligned, names, conservation, filePaths, binderChainIds } = useMemo(() => {
     const seqCounts = buildSeqCounts(activeRows, sequences)
-    const nameList: string[] = []
-    const seqList:  string[] = []
+    const nameList:     string[] = []
+    const seqList:      string[] = []
+    const filePathList: string[] = []
+    const chainIdList:  string[] = []
     for (const row of activeRows) {
       const chains = sequences.get(row.filePath ?? row.name) ?? sequences.get(row.name)
       if (!chains?.length) continue
-      const seq = pickBinderChain(chains, seqCounts)
-      if (!seq) continue
+      const result = pickBinderChain(chains, seqCounts)
+      if (!result) continue
       nameList.push(row.name)
-      seqList.push(seq)
+      seqList.push(result.seq)
+      filePathList.push(row.filePath ?? row.name)
+      chainIdList.push(result.chainId)
     }
-    if (seqList.length < 2) return { aligned: seqList, names: nameList, conservation: [] as number[] }
+    if (seqList.length < 2) return { aligned: seqList, names: nameList, conservation: [] as number[], filePaths: filePathList, binderChainIds: chainIdList }
     const al   = starAlign(seqList)
     const cons = columnConservation(al)
-    return { aligned: al, names: nameList, conservation: cons }
+    return { aligned: al, names: nameList, conservation: cons, filePaths: filePathList, binderChainIds: chainIdList }
   }, [activeRows, sequences])
+
+  // Stable fallback: when CDR track is off, selectors return these so Zustand
+  // won't re-render AlignmentViewer on annotation changes.
+  const annotations         = useAntpackStore(s => showCdrTrack ? s.annotations : EMPTY_ANNOTATIONS)
+  const cdrConfidenceFilter = useAntpackStore(s => showCdrTrack ? s.cdrConfidenceFilter : 'all')
+
+  const cdrTrack = useMemo((): (CdrRegionName | null)[] => {
+    if (!showCdrTrack || !aligned.length) return []
+    const len = aligned[0].length
+    const threshold = CDR_CONFIDENCE_THRESHOLDS[cdrConfidenceFilter]
+    const votes = Array.from({ length: len }, () => new Map<CdrRegionName, number>())
+    for (let rowIdx = 0; rowIdx < aligned.length; rowIdx++) {
+      const fileAnnotations = annotations.get(filePaths[rowIdx])
+      if (!fileAnnotations) continue
+      const chainAnnot = fileAnnotations.find(
+        a => a.chain === binderChainIds[rowIdx] && a.percentIdentity >= threshold,
+      )
+      if (!chainAnnot?.assignments) continue
+      const alignedSeq = aligned[rowIdx]
+      let residueIdx = 0
+      for (let col = 0; col < len; col++) {
+        if (alignedSeq[col] === '-') continue
+        const region = chainAnnot.assignments[residueIdx]
+        if (region) votes[col].set(region, (votes[col].get(region) ?? 0) + 1)
+        residueIdx++
+      }
+    }
+    return votes.map(colVotes => {
+      if (!colVotes.size) return null
+      return [...colVotes.entries()].sort((a, b) => b[1] - a[1])[0][0]
+    })
+  }, [showCdrTrack, aligned, filePaths, binderChainIds, annotations, cdrConfidenceFilter])
 
   const handleLoad = useCallback((name: string) => {
     const file =
@@ -340,6 +385,20 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
             </span>
 
             <button
+              onClick={() => setShowCdrTrack(v => !v)}
+              title={showCdrTrack ? 'Hide CDR/FW regions' : 'Show CDR/FW regions'}
+              style={{
+                fontSize: 10, padding: '2px 7px', borderRadius: 4,
+                border: '1px solid var(--color-border)', cursor: 'pointer',
+                background: showCdrTrack ? 'var(--color-accent)' : 'transparent',
+                color: showCdrTrack ? 'var(--color-bg)' : 'var(--color-text-secondary)',
+                flexShrink: 0,
+              }}
+            >
+              CDR
+            </button>
+
+            <button
               onClick={() => exportPng(names, aligned, conservation, colorMode, isDark)}
               title="Export alignment as PNG"
               style={{
@@ -368,6 +427,7 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
             colorMode={colorMode}
             isDark={isDark}
             onLoad={handleLoad}
+            cdrTrack={cdrTrack}
           />
         </div>
       )}
@@ -407,12 +467,16 @@ interface GridProps {
   colorMode: ColorMode
   isDark: boolean
   onLoad: (name: string) => void
+  cdrTrack?: (CdrRegionName | null)[]
 }
 
-const AlignmentGrid = memo(function AlignmentGrid({ aligned, names, conservation, colorMode, isDark, onLoad }: GridProps) {
+const AlignmentGrid = memo(function AlignmentGrid({ aligned, names, conservation, colorMode, isDark, onLoad, cdrTrack }: GridProps) {
   const n   = names.length
   const len = aligned[0]?.length ?? 0
   if (!n || !len) return null
+
+  const cdrSpans = buildCdrSpans(cdrTrack ?? [])
+  const hasCdr   = cdrSpans.length > 0
 
   return (
     <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: CELL_H - 3, lineHeight: 1 }}>
@@ -434,9 +498,42 @@ const AlignmentGrid = memo(function AlignmentGrid({ aligned, names, conservation
         ))}
       </div>
 
+      {/* CDR/FW annotation track */}
+      {hasCdr && (
+        <div style={{
+          height: CDR_H,
+          position: 'sticky', top: NUM_H, zIndex: 2,
+          background: 'var(--color-secondary-bg)',
+        }}>
+          <div style={{ position: 'relative', height: CDR_H, marginLeft: NAME_W }}>
+            {cdrSpans.map(({ region, startIdx, endIdx }) => {
+              const w = (endIdx - startIdx + 1) * CELL_W
+              const colors = REGION_COLORS[region]
+              return (
+                <div key={`${region}-${startIdx}`} style={{
+                  position: 'absolute',
+                  left: startIdx * CELL_W,
+                  width: w,
+                  height: CDR_H - 2,
+                  top: 1,
+                  background: colors.bg,
+                  color: colors.fg,
+                  fontSize: 8,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  overflow: 'hidden', whiteSpace: 'nowrap',
+                  borderRadius: 2,
+                }}>
+                  {w >= 22 ? region : ''}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Conservation bar */}
       {colorMode !== 'none' && (
-        <div style={{ display: 'flex', height: CONS_H, paddingLeft: NAME_W, position: 'sticky', top: NUM_H, zIndex: 2 }}>
+        <div style={{ display: 'flex', height: CONS_H, paddingLeft: NAME_W, position: 'sticky', top: NUM_H + (hasCdr ? CDR_H : 0), zIndex: 2 }}>
           {conservation.map((score, col) => (
             <div key={col} style={{
               width: CELL_W, height: CONS_H, flexShrink: 0,

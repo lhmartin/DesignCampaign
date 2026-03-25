@@ -41,6 +41,42 @@ export const CDR_CONFIDENCE_THRESHOLDS: Record<CdrConfidenceFilter, number> = {
   high:   0.7,
 }
 
+/** CSS colours for each CDR/FW region (references CSS variables from globals.css). */
+export const REGION_COLORS: Record<CdrRegionName, { bg: string; fg: string }> = {
+  CDR1: { bg: 'var(--color-cdr1)', fg: 'var(--color-cdr1-fg)' },
+  CDR2: { bg: 'var(--color-cdr2)', fg: 'var(--color-cdr2-fg)' },
+  CDR3: { bg: 'var(--color-cdr3)', fg: 'var(--color-cdr3-fg)' },
+  FW1:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
+  FW2:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
+  FW3:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
+  FW4:  { bg: 'var(--color-fw)',   fg: 'var(--color-fw-fg)' },
+}
+
+export interface CdrSpan {
+  region:   CdrRegionName
+  startIdx: number   // inclusive, 0-indexed into assignments/columns
+  endIdx:   number   // inclusive
+}
+
+/** Group consecutive same-region assignments into contiguous spans. */
+export function buildCdrSpans(assignments: (CdrRegionName | null)[]): CdrSpan[] {
+  const spans: CdrSpan[] = []
+  let cur: CdrSpan | null = null
+  for (let i = 0; i < assignments.length; i++) {
+    const r = assignments[i]
+    if (r === null) {
+      if (cur) { spans.push(cur); cur = null }
+    } else if (cur && cur.region === r) {
+      cur.endIdx = i
+    } else {
+      if (cur) spans.push(cur)
+      cur = { region: r, startIdx: i, endIdx: i }
+    }
+  }
+  if (cur) spans.push(cur)
+  return spans
+}
+
 interface AntPackStore {
   /** Map from structure file path → per-chain annotations */
   annotations: Map<string, ChainCdrAnnotation[]>
