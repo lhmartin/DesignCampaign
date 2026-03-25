@@ -29,6 +29,12 @@ export default defineConfig({
       renderer: process.env.NODE_ENV === 'test' ? undefined : {},
     }),
   ],
+  server: {
+    watch: {
+      // Marimo writes session files here — ignore to prevent spurious reloads
+      ignored: [/__marimo__/, /notebook\.py/],
+    },
+  },
   // Polyfill Node.js `global` for CJS libraries (plotly.js, etc.) in browser/renderer
   define: {
     global: 'globalThis',

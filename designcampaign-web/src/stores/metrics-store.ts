@@ -25,8 +25,8 @@ interface MetricsStore {
   progress: number
 
   calculateAll: (files: FileInfo[], readFile: (p: string) => Promise<string>) => Promise<void>
-  /** Try to read <stem>.json next to each PDB/CIF file; silently skip missing ones. Returns count loaded. */
-  autoLoadSidecars: (files: FileInfo[], readFile: (p: string) => Promise<string>) => Promise<number>
+  /** Try to read <stem>.json next to each PDB/CIF file; only reads paths in existingJsonPaths (avoids ENOENT). Returns count loaded. */
+  autoLoadSidecars: (files: FileInfo[], readFile: (p: string) => Promise<string>, existingJsonPaths: Set<string>) => Promise<number>
   addRow: (row: ProteinMetrics) => void
   importCSV: (text: string) => void
   importJSON: (text: string) => void
@@ -213,62 +213,65 @@ export const useMetricsStore = create<MetricsStore>()(
   })),
 
   // ── Calculate from PDB B-factors ─────────────────────────────────────────
-  // Process ONE file at a time and yield the event loop between each so the
-  // UI (progress bar, responsiveness) stays live throughout.  A batch-of-20
-  // approach caused 200–300 ms main-thread blocks because all synchronous
-  // PDB parses ran back-to-back after their reads resolved together.
+  // Read files in parallel batches of 8 to overlap I/O, then parse
+  // synchronously and yield once per batch. Upsert only the new batch
+  // results each iteration to keep store updates O(N) total.
   calculateAll: async (files, readFile) => {
     set({ isCalculating: true, progress: 0 })
-    const results: ProteinMetrics[] = []
-    // Batch sequence updates — merged once after the loop (O(N) instead of O(N²) Map copies)
-    const seqBatch = new Map<string, import('@/stores/sequence-store').ChainSeq[]>()
+    const BATCH = 8
+    try {
+      for (let i = 0; i < files.length; i += BATCH) {
+        const batch    = files.slice(i, i + BATCH)
+        const contents = await Promise.all(batch.map(f => readFile(f.path).catch(() => null)))
 
-    for (let i = 0; i < files.length; i++) {
-      try {
-        const content = await readFile(files[i].path)
-        const m = extractMetricsFromPDB(content)
-        const name = getFileStem(files[i].name)
-        results.push({
-          name,
-          filePath: files[i].path,
-          metrics: m as unknown as Record<string, number>,
-        })
-        // Collect sequences keyed by filePath — avoids name-mismatch when sidecar
-        // JSON overrides the display name before calculateAll runs.
-        const chainData = parseChainSequences(content)
-        seqBatch.set(files[i].path, Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence })))
-      } catch { /* skip unreadable files */ }
+        const batchResults: ProteinMetrics[] = []
+        const seqBatch = new Map<string, import('@/stores/sequence-store').ChainSeq[]>()
+        for (let j = 0; j < batch.length; j++) {
+          const content = contents[j]
+          if (!content) continue
+          try {
+            const m    = extractMetricsFromPDB(content)
+            const name = getFileStem(batch[j].name)
+            batchResults.push({ name, filePath: batch[j].path, metrics: m as unknown as Record<string, number> })
+            const chainData = parseChainSequences(content)
+            seqBatch.set(batch[j].path, Array.from(chainData.entries()).map(([chain, d]) => ({ chain, seq: d.sequence })))
+          } catch { /* skip unreadable files */ }
+        }
 
-      // Push incremental update and yield to event loop every file
-      set(s => ({
-        rows: upsertRows(s.rows, results),
-        allColumns: mergeColumns(s.allColumns, BUILTIN_COLS),
-        progress: (i + 1) / files.length,
-      }))
-      await new Promise(r => setTimeout(r, 0))
+        // Flush sequences per-batch so we don't hold all 10k in memory at once
+        if (seqBatch.size > 0) useSequenceStore.getState().mergeSequences(seqBatch)
+
+        if (batchResults.length > 0) {
+          set(s => ({
+            rows: upsertRows(s.rows, batchResults),
+            allColumns: mergeColumns(s.allColumns, BUILTIN_COLS),
+            progress: Math.min(i + BATCH, files.length) / files.length,
+          }))
+        } else {
+          set({ progress: Math.min(i + BATCH, files.length) / files.length })
+        }
+        await new Promise(r => setTimeout(r, 0))
+      }
+    } finally {
+      set({ isCalculating: false, progress: 1 })
     }
-
-    // Single O(N) merge — one Map copy for all N structures
-    if (seqBatch.size > 0) useSequenceStore.getState().mergeSequences(seqBatch)
-
-    set({ isCalculating: false, progress: 1 })
   },
 
   // ── Auto-load JSON sidecars ───────────────────────────────────────────────
-  autoLoadSidecars: async (files, readFile) => {
+  autoLoadSidecars: async (files, readFile, existingJsonPaths) => {
     set({ isLoadingSidecars: true })
     const BATCH = 10
     let loaded = 0
-
+    try {
     for (let i = 0; i < files.length; i += BATCH) {
       const batch = files.slice(i, i + BATCH)
       const results: ProteinMetrics[] = []
       const newCols: string[] = []
 
       await Promise.all(batch.map(async (f) => {
-        // Replace the extension with .json to get the sidecar path
         const jsonPath = f.path.replace(/\.(pdb|cif|mmcif)$/i, '.json')
         if (jsonPath === f.path) return // no recognised extension
+        if (!existingJsonPaths.has(jsonPath)) return // sidecar absent — skip without an IPC call
 
         try {
           const text = await readFile(jsonPath)
@@ -283,12 +286,7 @@ export const useMetricsStore = create<MetricsStore>()(
             console.warn(`[sidecars] ${jsonPath.split('/').pop()} parsed but produced no numeric metrics`)
           }
         } catch (err) {
-          // ENOENT (file not found) is expected for structures without sidecars — skip silently.
-          // Any other error is likely a bug — log it.
-          const msg = err instanceof Error ? err.message : String(err)
-          if (!msg.includes('ENOENT') && !msg.includes('no such file') && !msg.includes('NotFound')) {
-            console.error(`[sidecars] failed to read ${jsonPath}:`, err)
-          }
+          console.error(`[sidecars] failed to read ${jsonPath}:`, err)
         }
       }))
 
@@ -301,8 +299,9 @@ export const useMetricsStore = create<MetricsStore>()(
 
       await new Promise(r => setTimeout(r, 0))
     }
-
-    set({ isLoadingSidecars: false })
+    } finally {
+      set({ isLoadingSidecars: false })
+    }
     return loaded
   },
 

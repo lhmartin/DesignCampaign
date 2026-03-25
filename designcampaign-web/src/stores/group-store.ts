@@ -47,7 +47,8 @@ async function hashSeq(seq: string): Promise<string> {
 export interface ChainHashResult {
   path: string
   mtime: number
-  chainHashes: Record<string, string>  // chainId → 12-char hex
+  chainHashes: Record<string, string>     // chainId → 12-char hex
+  chainSeqPrefixes: Record<string, string> // chainId → first 10 residues
 }
 
 export interface StructureGroup {
@@ -65,6 +66,8 @@ interface GroupStore {
   isGrouping: boolean
   progress: number   // 0–1
   viewMode: 'tree' | 'groups'
+  /** The files array that was last passed to startGrouping — used to skip re-grouping on component remount. */
+  lastGroupedFiles: FileInfo[] | null
   startGrouping: (files: FileInfo[], readFile: (path: string) => Promise<string>) => Promise<void>
   clearGroups: () => void
   toggleGroup: (id: string) => void
@@ -92,6 +95,23 @@ function computeGroups(hashResults: Map<string, ChainHashResult>): {
     Array.from(freq.entries()).filter(([, c]) => c > threshold).map(([h]) => h),
   )
 
+  // Build hash → most-common (chainId, seqPrefix) so labels show chain IDs and sequence, not hashes.
+  const hashToChain = new Map<string, Map<string, { count: number; seq: string }>>()
+  for (const { chainHashes, chainSeqPrefixes } of hashResults.values()) {
+    for (const [chainId, h] of Object.entries(chainHashes)) {
+      if (!hashToChain.has(h)) hashToChain.set(h, new Map())
+      const entry = hashToChain.get(h)!
+      const prev = entry.get(chainId)
+      entry.set(chainId, { count: (prev?.count ?? 0) + 1, seq: chainSeqPrefixes[chainId] ?? '' })
+    }
+  }
+  const dominantChain = (h: string): { chainId: string; seq: string } => {
+    const entry = hashToChain.get(h)
+    if (!entry) return { chainId: h.slice(0, 4), seq: '' }
+    const [chainId, { seq }] = [...entry.entries()].sort((a, b) => b[1].count - a[1].count)[0]
+    return { chainId, seq }
+  }
+
   const groupMap = new Map<string, string[]>()
   const ungrouped: string[] = []
 
@@ -106,13 +126,20 @@ function computeGroups(hashResults: Map<string, ChainHashResult>): {
     }
   }
 
-  const groups: StructureGroup[] = Array.from(groupMap.entries()).map(([key, members]) => ({
-    id: key,
-    targetHash: key.split(':')[0],
-    label: `Target ${key.slice(0, 8)}…`,
-    members: members.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
-    isExpanded: true,
-  }))
+  const groups: StructureGroup[] = Array.from(groupMap.entries()).map(([key, members]) => {
+    const chains = key.split(':').map(dominantChain)
+    const chainIds = chains.map(c => c.chainId).join('+')
+    // Show seq prefix of the first target chain; append … if the chain is longer than the prefix
+    const { seq } = chains[0]
+    const seqLabel = seq ? ` · ${seq}${seq.length >= 10 ? '…' : ''}` : ''
+    return {
+      id: key,
+      targetHash: key.split(':')[0],
+      label: `Target (${chainIds}${seqLabel})`,
+      members: members.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      isExpanded: true,
+    }
+  })
 
   groups.sort((a, b) => b.members.length - a.members.length)
   return { groups, ungrouped: ungrouped.sort() }
@@ -127,8 +154,9 @@ export const useGroupStore = create<GroupStore>()(
   isGrouping: false,
   progress: 0,
   viewMode: 'tree',
+  lastGroupedFiles: null,
 
-  clearGroups: () => set({ hashResults: new Map(), groups: [], ungrouped: [], progress: 0, isGrouping: false }),
+  clearGroups: () => set({ hashResults: new Map(), groups: [], ungrouped: [], progress: 0, isGrouping: false, lastGroupedFiles: null }),
 
   toggleGroup: (id) =>
     set(s => ({
@@ -138,7 +166,10 @@ export const useGroupStore = create<GroupStore>()(
   setViewMode: (mode) => set({ viewMode: mode }),
 
   startGrouping: async (files, readFile) => {
-    set({ isGrouping: true, progress: 0, hashResults: new Map(), groups: [], ungrouped: [] })
+    // Same file array reference → already grouped (or in progress). Bail out.
+    // This prevents re-grouping when FileBrowser remounts on tab switch.
+    if (files === get().lastGroupedFiles) return
+    set({ isGrouping: true, progress: 0, hashResults: new Map(), groups: [], ungrouped: [], lastGroupedFiles: files })
     const results = new Map<string, ChainHashResult>()
     const BATCH = 10
 
@@ -146,17 +177,19 @@ export const useGroupStore = create<GroupStore>()(
       const batch = files.slice(i, i + BATCH)
       await Promise.all(batch.map(async (f) => {
         try {
-          // Check cache first
+          // Check cache first; skip stale entries missing chainSeqPrefixes (schema bump)
           const cached = await dbGet(f.path, f.mtime)
-          if (cached) { results.set(f.path, cached); return }
+          if (cached?.chainSeqPrefixes) { results.set(f.path, cached); return }
 
           const content = await readFile(f.path)
           const chains = parseChainSequences(content)
           const chainHashes: Record<string, string> = {}
+          const chainSeqPrefixes: Record<string, string> = {}
           for (const [chainId, data] of chains) {
             chainHashes[chainId] = await hashSeq(data.sequence)
+            chainSeqPrefixes[chainId] = data.sequence.slice(0, 10)
           }
-          const r: ChainHashResult = { path: f.path, mtime: f.mtime, chainHashes }
+          const r: ChainHashResult = { path: f.path, mtime: f.mtime, chainHashes, chainSeqPrefixes }
           results.set(f.path, r)
           await dbPut(r)
         } catch { /* skip on error */ }
@@ -169,7 +202,7 @@ export const useGroupStore = create<GroupStore>()(
       await new Promise(r => setTimeout(r, 0))
     }
 
-    set({ isGrouping: false, progress: 1 })
+    set({ isGrouping: false, progress: 1, lastGroupedFiles: files })
   },
     }),
     {

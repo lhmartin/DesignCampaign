@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { useDefaultLayout } from 'react-resizable-panels'
-import { FolderOpen, Table2, ScatterChart, GitMerge, SlidersHorizontal, MousePointer2, Database, Sun, Moon, MessageSquare } from 'lucide-react'
+import { getFileName } from '@/lib/utils'
+import { FolderOpen, Table2, ScatterChart, GitMerge, SlidersHorizontal, MousePointer2, Database, Sun, Moon, MessageSquare, BookOpen } from 'lucide-react'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { FileBrowser } from '@/components/files/FileBrowser'
@@ -12,6 +13,7 @@ import { SelectionPanel } from '@/components/selection/SelectionPanel'
 import { FilterPanel } from '@/components/filter/FilterPanel'
 import { UniProtPanel } from '@/components/metrics/UniProtPanel'
 import { ChatPanel } from '@/components/chat/ChatPanel'
+import { MarimoTab } from '@/components/notebook/MarimoTab'
 import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { UpdateBanner } from './UpdateBanner'
@@ -36,6 +38,7 @@ export function AppShell() {
   const { activeFile, currentFolder, setFolder } = useFileStore()
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
   const [showPythonSetup, setShowPythonSetup] = useState(false)
+  const [rightPanelMode, setRightPanelMode] = useState<'viewer' | 'notebook'>('viewer')
 
   // Persist panel layout across sessions via localStorage.
   // useDefaultLayout reads/writes to localStorage keyed by `id`.
@@ -111,29 +114,49 @@ export function AppShell() {
             whiteSpace: 'nowrap',
             maxWidth: 320,
           }}>
-            {activeFile.split('/').pop()?.split('\\').pop()}
+            {getFileName(activeFile)}
           </span>
         )}
 
-        <button
-          onClick={() => setIsDark(d => !d)}
-          style={{
-            marginLeft: 'auto',
-            padding: '2px 8px',
-            borderRadius: 4,
-            fontSize: 10,
-            color: 'var(--color-text-secondary)',
-            border: '1px solid var(--color-border)',
-            background: 'transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-          }}
-          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {isDark ? <><Sun size={11} />Light</> : <><Moon size={11} />Dark</>}
-        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+          <button
+            onClick={() => setRightPanelMode(m => m === 'viewer' ? 'notebook' : 'viewer')}
+            title={rightPanelMode === 'viewer' ? 'Open Marimo notebook' : 'Back to structure viewer'}
+            style={{
+              padding: '2px 8px',
+              borderRadius: 4,
+              fontSize: 10,
+              color: rightPanelMode === 'notebook' ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+              border: `1px solid ${rightPanelMode === 'notebook' ? 'var(--color-accent)' : 'var(--color-border)'}`,
+              background: 'transparent',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <BookOpen size={11} />
+            Notebook
+          </button>
+          <button
+            onClick={() => setIsDark(d => !d)}
+            style={{
+              padding: '2px 8px',
+              borderRadius: 4,
+              fontSize: 10,
+              color: 'var(--color-text-secondary)',
+              border: '1px solid var(--color-border)',
+              background: 'transparent',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {isDark ? <><Sun size={11} />Light</> : <><Moon size={11} />Dark</>}
+          </button>
+        </div>
       </div>
 
       {/* ── Main panel area ────────────────────────────────────────────────── */}
@@ -217,15 +240,33 @@ export function AppShell() {
 
         <ResizableHandle withHandle />
 
-        {/* ── Right card: structure viewer ── */}
+        {/* ── Right card: structure viewer / notebook ── */}
         <ResizablePanel id="right-panel" defaultSize="62%" minSize="30%">
-          <div style={cardStyle}>
-            <MolstarViewer
-              ref={viewerRef}
-              onStructureLoaded={(path) => { console.log('Loaded:', path) }}
-              onError={(err) => { console.error('Viewer error:', err) }}
-              onNeedPythonSetup={() => setShowPythonSetup(true)}
-            />
+          <div style={{ ...cardStyle, position: 'relative' }}>
+
+            {/* Mol* viewer — hidden but kept mounted when in notebook mode */}
+            <div style={{
+              position: 'absolute', inset: 0,
+              visibility: rightPanelMode === 'viewer' ? 'visible' : 'hidden',
+              pointerEvents: rightPanelMode === 'viewer' ? 'auto' : 'none',
+            }}>
+              <MolstarViewer
+                ref={viewerRef}
+                onStructureLoaded={(path) => { console.log('Loaded:', path) }}
+                onError={(err) => { console.error('Viewer error:', err) }}
+                onNeedPythonSetup={() => setShowPythonSetup(true)}
+              />
+            </div>
+
+            {/* Marimo tab — kept mounted when running so WebSocket stays alive */}
+            <div style={{
+              position: 'absolute', inset: 0,
+              visibility: rightPanelMode === 'notebook' ? 'visible' : 'hidden',
+              pointerEvents: rightPanelMode === 'notebook' ? 'auto' : 'none',
+            }}>
+              <MarimoTab />
+            </div>
+
           </div>
         </ResizablePanel>
 

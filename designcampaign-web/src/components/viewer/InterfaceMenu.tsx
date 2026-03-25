@@ -5,9 +5,10 @@ import { useFileStore } from '@/stores/file-store'
 import { useMetricsStore } from '@/stores/metrics-store'
 import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
 import { extractAtomsFromPlugin, computeContacts } from '@/lib/interface-calc'
-import { parseAtoms } from '@/lib/parsers/parse-atoms'
 import { readFileContent } from '@/lib/fsa'
+
 import { getFileStem } from '@/lib/utils'
+import type { WorkerBatchInput, WorkerFileResult } from '@/workers/interface-calc.worker'
 import { INTERFACE_THEME_ID, PARATOPE_COLOR, EPITOPE_COLOR } from './themes/interface-theme'
 import { applyToAllRepresentations } from './MolstarViewer'
 
@@ -165,7 +166,17 @@ function IconInterface({ size = 14 }: { size?: number }) {
 export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
   const [open, setOpen]           = useState(false)
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
+  const panelRef  = useRef<HTMLDivElement>(null)
+  const workerRef = useRef<Worker | null>(null)
+
+  // Spin up the contact-calc worker once; terminate on unmount
+  useEffect(() => {
+    workerRef.current = new Worker(
+      new URL('../../workers/interface-calc.worker.ts', import.meta.url),
+      { type: 'module' },
+    )
+    return () => { workerRef.current?.terminate(); workerRef.current = null }
+  }, [])
 
   // Store — data only (individual selectors to avoid snapshot instability)
   const binderChains  = useInterfaceStore(s => s.binderChains)
@@ -245,6 +256,9 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
     const files = useFileStore.getState().files
     if (files.length === 0) { store.setError('No files loaded.'); return }
 
+    const worker = workerRef.current
+    if (!worker) { store.setError('Contact worker not ready.'); return }
+
     setBatchProgress({ done: 0, total: files.length })
     store.setCalculating(true)
 
@@ -254,34 +268,48 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
     try {
       for (let i = 0; i < files.length; i += BATCH_SIZE) {
         const batch = files.slice(i, i + BATCH_SIZE)
-        // Read all files in the batch concurrently
+        // Read all files in the batch concurrently on the main thread
         const texts = await Promise.all(
           batch.map(f => readFileContent(f.path).catch(() => null))
         )
         const { binderChains, targetChains, atomScope, cutoff } = useInterfaceStore.getState()
-        for (let j = 0; j < batch.length; j++) {
-          const text = texts[j]
-          if (!text) continue
-          const filePath = batch[j].path
-          const binderAtoms = parseAtoms(text, binderChains, atomScope)
-          const targetAtoms = parseAtoms(text, targetChains, atomScope)
-          const result      = computeContacts(binderAtoms, targetAtoms, cutoff)
-          batchResults.push({
-            filePath,
-            name:     getFileStem(batch[j].name),   // matches the name used by calculateAll
-            metrics: {
-              n_paratope: result.paratope.size,
-              n_epitope:  result.epitope.size,
-              n_contacts: result.nContacts,
-            },
-          })
-          interfaceData[filePath] = {
-            paratope: Array.from(result.paratope),
-            epitope:  Array.from(result.epitope),
-          }
+
+        // Offload contact computation to the worker thread
+        const input: WorkerBatchInput = {
+          files: batch.map((f, j) => ({
+            path: f.path,
+            name: getFileStem(f.name),
+            text: texts[j] ?? '',
+          })),
+          binderChains, targetChains, atomScope, cutoff,
         }
-        // Throttle progress updates and yield to UI thread each batch
+        const workerResults = await new Promise<WorkerFileResult[]>((resolve, reject) => {
+          const onMsg = (e: MessageEvent<WorkerFileResult[]>) => {
+            worker.removeEventListener('message', onMsg)
+            worker.removeEventListener('error', onErr)
+            resolve(e.data)
+          }
+          const onErr = (e: ErrorEvent) => {
+            worker.removeEventListener('message', onMsg)
+            worker.removeEventListener('error', onErr)
+            reject(new Error(e.message))
+          }
+          worker.addEventListener('message', onMsg)
+          worker.addEventListener('error', onErr)
+          worker.postMessage(input)
+        })
+
+        for (const r of workerResults) {
+          batchResults.push({
+            filePath: r.filePath,
+            name:     r.name,
+            metrics:  { n_paratope: r.nParatope, n_epitope: r.nEpitope, n_contacts: r.nContacts },
+          })
+          interfaceData[r.filePath] = { paratope: r.paratope, epitope: r.epitope }
+        }
+
         setBatchProgress({ done: Math.min(i + BATCH_SIZE, files.length), total: files.length })
+        // Yield to let the progress bar re-render
         await new Promise(r => setTimeout(r, 0))
       }
 

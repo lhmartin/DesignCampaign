@@ -45,10 +45,27 @@ export interface ElectronAPI {
   runPythonSetup(): Promise<{ ok: boolean; error?: string }>
   onPythonSetupProgress(callback: (message: string) => void): () => void
   onPythonSetupComplete(callback: () => void): () => void
+
+  // Marimo notebook server
+  marimoStart(notebookPath: string): Promise<{ port: number; contextPath: string }>
+  marimoStop(): Promise<void>
+  marimoStatus(): Promise<{ running: boolean; port: number | null }>
+  marimoInstall(): Promise<{ ok: boolean; error?: string }>
+  marimoUpdateContext(ctx: unknown): Promise<{ contextPath: string; metricsPath: string }>
+  onMarimoInstallProgress(callback: (msg: { done: boolean; message?: string }) => void): () => void
 }
 
 declare global {
   interface Window {
     electronAPI: ElectronAPI
+  }
+
+  namespace JSX {
+    interface IntrinsicElements {
+      webview: React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        src?: string
+        style?: React.CSSProperties
+      }
+    }
   }
 }

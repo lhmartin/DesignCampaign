@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
-import { FolderOpen, LayoutGrid } from 'lucide-react'
+import { useEffect, useRef, useState, useMemo, type RefObject } from 'react'
+import { FolderOpen, LayoutGrid, Search, X } from 'lucide-react'
 import { useFileStore } from '@/stores/file-store'
 import { useProteinStore } from '@/stores/protein-store'
 import { useGroupStore } from '@/stores/group-store'
@@ -67,8 +67,25 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
   const { groups, isGrouping, progress, startGrouping, clearGroups, viewMode, setViewMode } = useGroupStore()
   const { autoLoadSidecars, clearAll: clearMetrics } = useMetricsStore()
   const hasSetupListeners = useRef(false)
-  // Tracks which directory paths are expanded in tree view
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [fileSearchInput, setFileSearchInput] = useState('')
+  const [fileSearch, setFileSearch] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  // Debounce search input to avoid filtering 10k+ files on every keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setFileSearch(fileSearchInput), 150)
+    return () => clearTimeout(t)
+  }, [fileSearchInput])
+
+  const FILE_LIMIT = 100
+
+  const searchResults = useMemo(() => {
+    const q = fileSearch.trim().toLowerCase()
+    if (!q) return null
+    const matches = files.filter(f => f.name.toLowerCase().includes(q))
+    return { shown: matches.slice(0, FILE_LIMIT), total: matches.length }
+  }, [files, fileSearch])
 
   // Listen for menu shortcuts from Electron main process
   useEffect(() => {
@@ -79,15 +96,33 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
     return () => { cleanupOpen(); cleanupRefresh() }
   }, [openFolder, refreshFiles])
 
-  // When the file list changes: clear stale state, restart grouping, scan for JSON sidecars
+  // When the file list changes: clear stale state, restart grouping, scan for JSON sidecars.
+  // startGrouping has its own guard in the store and skips if called with the same files array.
   useEffect(() => {
-    if (files.length === 0) { clearGroups(); clearMetrics(); setExpanded(new Set()); return }
+    if (files.length === 0) {
+      clearGroups(); clearMetrics(); setExpanded(new Set())
+      return
+    }
 
     const readFile = window.electronAPI
       ? (p: string) => window.electronAPI!.readFile(p)
       : readFileContent
     startGrouping(files, readFile)
-    autoLoadSidecars(files, readFile)
+
+    // Discover which JSON sidecars actually exist before attempting reads,
+    // so autoLoadSidecars never triggers ENOENT errors in the main process.
+    const loadSidecars = async () => {
+      let jsonSet: Set<string>
+      if (window.electronAPI && currentFolder) {
+        const jsonFiles = await window.electronAPI.listFiles(currentFolder, ['json'])
+        jsonSet = new Set(jsonFiles.map(f => f.path))
+      } else {
+        // FSA / browser mode: attempt all (no listing available)
+        jsonSet = new Set(files.map(f => f.path.replace(/\.(pdb|cif|mmcif)$/i, '.json')))
+      }
+      autoLoadSidecars(files, readFile, jsonSet)
+    }
+    loadSidecars()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files])
 
@@ -166,6 +201,27 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
         </div>
       )}
 
+      {/* Search */}
+      {currentFolder && files.length > 0 && (
+        <div className="px-2 py-1.5 border-b border-[var(--color-border)] shrink-0">
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-[var(--color-primary-bg)] border border-[var(--color-border)]">
+            <Search size={11} className="text-[var(--color-text-disabled)] shrink-0" />
+            <input
+              ref={searchRef}
+              value={fileSearchInput}
+              onChange={e => setFileSearchInput(e.target.value)}
+              placeholder="Search files…"
+              className="flex-1 bg-transparent text-xs text-[var(--color-text-primary)] placeholder:text-[var(--color-text-disabled)] outline-none min-w-0"
+            />
+            {fileSearchInput && (
+              <button onClick={() => setFileSearchInput('')} className="text-[var(--color-text-disabled)] hover:text-[var(--color-text-secondary)]">
+                <X size={11} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Grouping progress bar */}
       {isGrouping && (
         <div className="px-2 py-1 shrink-0 border-b border-[var(--color-border)]">
@@ -197,14 +253,17 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
         </div>
       )}
 
-      {/* File list — tree or groups view */}
+      {/* File list — search / tree / groups view */}
       {currentFolder && !isScanning && files.length > 0 && (
-        viewMode === 'groups' && hasGroups
-          ? <FileTree viewerRef={viewerRef} />
-          : (
+        searchResults
+          ? (
             <div className="flex-1 overflow-y-auto">
-              {/* Root-level files (no subdir) */}
-              {dirTree.files.map(file => (
+              {searchResults.shown.length === 0 && (
+                <div className="flex items-center justify-center h-20 text-xs text-[var(--color-text-disabled)] px-4 text-center">
+                  No files match "{fileSearchInput}"
+                </div>
+              )}
+              {searchResults.shown.map(file => (
                 <FileRow
                   key={file.path}
                   file={file}
@@ -213,28 +272,59 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
                   onClick={(e) => handleFileClick(file, e)}
                 />
               ))}
-              {/* Subdirectory nodes */}
-              {dirTree.subdirs.map(dir => (
-                <DirNodeView
-                  key={dir.relPath}
-                  node={dir}
-                  depth={0}
-                  expanded={expanded}
-                  activeFile={activeFile}
-                  onToggle={toggleDir}
-                  onFileClick={handleFileClick}
-                />
-              ))}
             </div>
           )
+          : viewMode === 'groups' && hasGroups
+            ? <FileTree viewerRef={viewerRef} />
+            : (
+              <div className="flex-1 overflow-y-auto">
+                {dirTree.files.slice(0, FILE_LIMIT).map(file => (
+                  <FileRow
+                    key={file.path}
+                    file={file}
+                    isActive={file.path === activeFile}
+                    indent={0}
+                    onClick={(e) => handleFileClick(file, e)}
+                  />
+                ))}
+                {dirTree.subdirs.map(dir => (
+                  <DirNodeView
+                    key={dir.relPath}
+                    node={dir}
+                    depth={0}
+                    expanded={expanded}
+                    activeFile={activeFile}
+                    onToggle={toggleDir}
+                    onFileClick={handleFileClick}
+                    fileLimit={FILE_LIMIT}
+                  />
+                ))}
+              </div>
+            )
       )}
 
       {/* Status bar */}
       {currentFolder && !isScanning && files.length > 0 && (
         <div className="px-2 py-1 text-xs text-[var(--color-text-secondary)] border-t border-[var(--color-border)] shrink-0 flex items-center gap-2">
-          <span>{files.length} file{files.length !== 1 ? 's' : ''}</span>
-          {hasGroups && !isGrouping && (
-            <span className="opacity-60">· {groups.length} group{groups.length !== 1 ? 's' : ''}</span>
+          {searchResults ? (
+            <span>
+              {searchResults.total === 0
+                ? 'No matches'
+                : searchResults.total > FILE_LIMIT
+                  ? `${FILE_LIMIT} of ${searchResults.total} matches`
+                  : `${searchResults.total} match${searchResults.total !== 1 ? 'es' : ''}`}
+            </span>
+          ) : (
+            <>
+              <span>
+                {files.length > FILE_LIMIT
+                  ? `${FILE_LIMIT} of ${files.length} files — search to find more`
+                  : `${files.length} file${files.length !== 1 ? 's' : ''}`}
+              </span>
+              {hasGroups && !isGrouping && (
+                <span className="opacity-60">· {groups.length} group{groups.length !== 1 ? 's' : ''}</span>
+              )}
+            </>
           )}
         </div>
       )}
@@ -245,7 +335,7 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
 // ── Directory node (recursive) ────────────────────────────────────────────────
 
 function DirNodeView({
-  node, depth, expanded, activeFile, onToggle, onFileClick,
+  node, depth, expanded, activeFile, onToggle, onFileClick, fileLimit,
 }: {
   node: DirNode
   depth: number
@@ -253,13 +343,15 @@ function DirNodeView({
   activeFile: string | null
   onToggle: (relPath: string) => void
   onFileClick: (f: FileInfo, e: React.MouseEvent) => void
+  fileLimit: number
 }) {
   const isOpen = expanded.has(node.relPath)
   const totalFiles = countFiles(node)
+  const shownFiles = node.files.slice(0, fileLimit)
+  const hiddenCount = node.files.length - shownFiles.length
 
   return (
     <div>
-      {/* Directory row */}
       <button
         onClick={() => onToggle(node.relPath)}
         className="w-full text-left flex items-center gap-1.5 px-2 py-1 hover:bg-[var(--color-secondary-bg)] transition-colors"
@@ -273,10 +365,9 @@ function DirNodeView({
         <span className="text-[10px] text-[var(--color-text-disabled)] shrink-0">{totalFiles}</span>
       </button>
 
-      {/* Children when expanded */}
       {isOpen && (
         <>
-          {node.files.map(f => (
+          {shownFiles.map(f => (
             <FileRow
               key={f.path}
               file={f}
@@ -285,6 +376,14 @@ function DirNodeView({
               onClick={(e) => onFileClick(f, e)}
             />
           ))}
+          {hiddenCount > 0 && (
+            <div
+              className="text-[10px] text-[var(--color-text-disabled)] py-1 italic"
+              style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }}
+            >
+              {hiddenCount} more — use search to find
+            </div>
+          )}
           {node.subdirs.map(sub => (
             <DirNodeView
               key={sub.relPath}
@@ -294,6 +393,7 @@ function DirNodeView({
               activeFile={activeFile}
               onToggle={onToggle}
               onFileClick={onFileClick}
+              fileLimit={fileLimit}
             />
           ))}
         </>

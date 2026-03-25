@@ -9,7 +9,9 @@ Protocol:
 
 import sys
 import json
+import os
 import traceback as tb
+from concurrent.futures import ThreadPoolExecutor
 
 
 # ── IMGT region boundaries ────────────────────────────────────────────────────
@@ -35,6 +37,10 @@ def _imgt_region(num_str: str) -> str | None:
 # AntPack loads model weights on construction; caching avoids reloading per sequence.
 _annotator_cache: dict = {}
 
+# Thread pool for parallel annotation. AntPack uses NumPy/C extensions which
+# release the GIL, so threads give real parallelism without multiprocessing overhead.
+_thread_pool: 'ThreadPoolExecutor | None' = None
+
 def _get_annotator(scheme: str):
     """Return a single annotator that scores all chain types (H, K, L)."""
     if scheme not in _annotator_cache:
@@ -42,6 +48,35 @@ def _get_annotator(scheme: str):
         # chains=['H','K','L'] lets AntPack pick the best-matching chain type.
         _annotator_cache[scheme] = SingleChainAnnotator(chains=['H', 'K', 'L'], scheme=scheme)
     return _annotator_cache[scheme]
+
+def _get_thread_pool() -> ThreadPoolExecutor:
+    global _thread_pool
+    if _thread_pool is None:
+        _thread_pool = ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 2))
+    return _thread_pool
+
+
+def _annotate_one(s: dict, ann, scheme: str) -> dict:
+    """Annotate a single sequence; safe to call from multiple threads."""
+    seq      = s['sequence']
+    name     = s['name']
+    chain_id = s.get('chain', 'A')
+    try:
+        numbering, pct_id, chain_type, err = ann.analyze_seq(seq)
+        assignments = [_imgt_region(pos) for pos in numbering]
+        return {
+            'name': name, 'chain': chain_id, 'scheme': scheme,
+            'chain_type': chain_type,
+            'percent_identity': float(pct_id),
+            'assignments': assignments,
+            'error': err or None,
+        }
+    except Exception:
+        return {
+            'name': name, 'chain': chain_id, 'scheme': scheme,
+            'chain_type': 'H',
+            'percent_identity': 0.0, 'assignments': [], 'error': 'Annotation failed',
+        }
 
 
 def _antpack_number(args: dict) -> list:
@@ -56,35 +91,13 @@ def _antpack_number(args: dict) -> list:
       (numbering, percent_identity, chain_type, error_msg)
     where `numbering` is already 1:1 with the input sequence (no gap positions).
     """
-    scheme = args.get('scheme', 'imgt')
-    results = []
+    scheme     = args.get('scheme', 'imgt')
+    sequences  = args['sequences']
+    ann        = _get_annotator(scheme)
+    pool       = _get_thread_pool()
 
-    ann = _get_annotator(scheme)
-
-    for s in args['sequences']:
-        seq      = s['sequence']
-        name     = s['name']
-        chain_id = s.get('chain', 'A')
-
-        try:
-            numbering, pct_id, chain_type, err = ann.analyze_seq(seq)
-            # numbering is 1:1 with input residues — map directly to FW/CDR names.
-            assignments = [_imgt_region(pos) for pos in numbering]
-            results.append({
-                'name': name, 'chain': chain_id, 'scheme': scheme,
-                'chain_type': chain_type,
-                'percent_identity': float(pct_id),
-                'assignments': assignments,
-                'error': err or None,
-            })
-        except Exception:
-            results.append({
-                'name': name, 'chain': chain_id, 'scheme': scheme,
-                'chain_type': 'H',
-                'percent_identity': 0.0, 'assignments': [], 'error': 'Annotation failed',
-            })
-
-    return results
+    futures = [pool.submit(_annotate_one, s, ann, scheme) for s in sequences]
+    return [f.result() for f in futures]
 
 
 # ── Dispatch table ────────────────────────────────────────────────────────────

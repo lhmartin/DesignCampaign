@@ -1,2 +1,6 @@
 spec/
 .claude/
+
+# Marimo session files and generated notebooks
+**/__marimo__/
+**/notebook.py
