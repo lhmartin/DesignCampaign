@@ -65,6 +65,8 @@ interface GroupStore {
   isGrouping: boolean
   progress: number   // 0–1
   viewMode: 'tree' | 'groups'
+  /** The files array that was last passed to startGrouping — used to skip re-grouping on component remount. */
+  lastGroupedFiles: FileInfo[] | null
   startGrouping: (files: FileInfo[], readFile: (path: string) => Promise<string>) => Promise<void>
   clearGroups: () => void
   toggleGroup: (id: string) => void
@@ -127,8 +129,9 @@ export const useGroupStore = create<GroupStore>()(
   isGrouping: false,
   progress: 0,
   viewMode: 'tree',
+  lastGroupedFiles: null,
 
-  clearGroups: () => set({ hashResults: new Map(), groups: [], ungrouped: [], progress: 0, isGrouping: false }),
+  clearGroups: () => set({ hashResults: new Map(), groups: [], ungrouped: [], progress: 0, isGrouping: false, lastGroupedFiles: null }),
 
   toggleGroup: (id) =>
     set(s => ({
@@ -138,7 +141,10 @@ export const useGroupStore = create<GroupStore>()(
   setViewMode: (mode) => set({ viewMode: mode }),
 
   startGrouping: async (files, readFile) => {
-    set({ isGrouping: true, progress: 0, hashResults: new Map(), groups: [], ungrouped: [] })
+    // Same file array reference → already grouped (or in progress). Bail out.
+    // This prevents re-grouping when FileBrowser remounts on tab switch.
+    if (files === get().lastGroupedFiles) return
+    set({ isGrouping: true, progress: 0, hashResults: new Map(), groups: [], ungrouped: [], lastGroupedFiles: files })
     const results = new Map<string, ChainHashResult>()
     const BATCH = 10
 
@@ -169,7 +175,7 @@ export const useGroupStore = create<GroupStore>()(
       await new Promise(r => setTimeout(r, 0))
     }
 
-    set({ isGrouping: false, progress: 1 })
+    set({ isGrouping: false, progress: 1, lastGroupedFiles: files })
   },
     }),
     {

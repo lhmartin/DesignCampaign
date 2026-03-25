@@ -67,7 +67,6 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
   const { groups, isGrouping, progress, startGrouping, clearGroups, viewMode, setViewMode } = useGroupStore()
   const { autoLoadSidecars, clearAll: clearMetrics } = useMetricsStore()
   const hasSetupListeners = useRef(false)
-  const lastGroupedFilesRef = useRef<typeof files | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [fileSearchInput, setFileSearchInput] = useState('')
   const [fileSearch, setFileSearch] = useState('')
@@ -98,16 +97,12 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
   }, [openFolder, refreshFiles])
 
   // When the file list changes: clear stale state, restart grouping, scan for JSON sidecars.
-  // Guard against re-running on remount (tab switch) — Zustand only creates a new files array
-  // when setFolder is called, so same reference means grouping is already in progress or done.
+  // startGrouping has its own guard in the store and skips if called with the same files array.
   useEffect(() => {
     if (files.length === 0) {
       clearGroups(); clearMetrics(); setExpanded(new Set())
-      lastGroupedFilesRef.current = null
       return
     }
-    if (files === lastGroupedFilesRef.current) return
-    lastGroupedFilesRef.current = files
 
     const readFile = window.electronAPI
       ? (p: string) => window.electronAPI!.readFile(p)
