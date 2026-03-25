@@ -94,6 +94,21 @@ function computeGroups(hashResults: Map<string, ChainHashResult>): {
     Array.from(freq.entries()).filter(([, c]) => c > threshold).map(([h]) => h),
   )
 
+  // Build hash → most-common chain ID mapping so labels show chain IDs, not hashes.
+  const hashToChainId = new Map<string, Map<string, number>>()
+  for (const { chainHashes } of hashResults.values()) {
+    for (const [chainId, h] of Object.entries(chainHashes)) {
+      if (!hashToChainId.has(h)) hashToChainId.set(h, new Map())
+      const counts = hashToChainId.get(h)!
+      counts.set(chainId, (counts.get(chainId) ?? 0) + 1)
+    }
+  }
+  const dominantChainId = (h: string): string => {
+    const counts = hashToChainId.get(h)
+    if (!counts) return h.slice(0, 4)
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  }
+
   const groupMap = new Map<string, string[]>()
   const ungrouped: string[] = []
 
@@ -108,13 +123,16 @@ function computeGroups(hashResults: Map<string, ChainHashResult>): {
     }
   }
 
-  const groups: StructureGroup[] = Array.from(groupMap.entries()).map(([key, members]) => ({
-    id: key,
-    targetHash: key.split(':')[0],
-    label: `Target ${key.slice(0, 8)}…`,
-    members: members.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
-    isExpanded: true,
-  }))
+  const groups: StructureGroup[] = Array.from(groupMap.entries()).map(([key, members]) => {
+    const chainIds = key.split(':').map(dominantChainId).join('+')
+    return {
+      id: key,
+      targetHash: key.split(':')[0],
+      label: `Target (${chainIds})`,
+      members: members.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      isExpanded: true,
+    }
+  })
 
   groups.sort((a, b) => b.members.length - a.members.length)
   return { groups, ungrouped: ungrouped.sort() }
