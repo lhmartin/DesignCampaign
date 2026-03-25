@@ -47,7 +47,8 @@ async function hashSeq(seq: string): Promise<string> {
 export interface ChainHashResult {
   path: string
   mtime: number
-  chainHashes: Record<string, string>  // chainId → 12-char hex
+  chainHashes: Record<string, string>     // chainId → 12-char hex
+  chainSeqPrefixes: Record<string, string> // chainId → first 10 residues
 }
 
 export interface StructureGroup {
@@ -94,19 +95,21 @@ function computeGroups(hashResults: Map<string, ChainHashResult>): {
     Array.from(freq.entries()).filter(([, c]) => c > threshold).map(([h]) => h),
   )
 
-  // Build hash → most-common chain ID mapping so labels show chain IDs, not hashes.
-  const hashToChainId = new Map<string, Map<string, number>>()
-  for (const { chainHashes } of hashResults.values()) {
+  // Build hash → most-common (chainId, seqPrefix) so labels show chain IDs and sequence, not hashes.
+  const hashToChain = new Map<string, Map<string, { count: number; seq: string }>>()
+  for (const { chainHashes, chainSeqPrefixes } of hashResults.values()) {
     for (const [chainId, h] of Object.entries(chainHashes)) {
-      if (!hashToChainId.has(h)) hashToChainId.set(h, new Map())
-      const counts = hashToChainId.get(h)!
-      counts.set(chainId, (counts.get(chainId) ?? 0) + 1)
+      if (!hashToChain.has(h)) hashToChain.set(h, new Map())
+      const entry = hashToChain.get(h)!
+      const prev = entry.get(chainId)
+      entry.set(chainId, { count: (prev?.count ?? 0) + 1, seq: chainSeqPrefixes[chainId] ?? '' })
     }
   }
-  const dominantChainId = (h: string): string => {
-    const counts = hashToChainId.get(h)
-    if (!counts) return h.slice(0, 4)
-    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  const dominantChain = (h: string): { chainId: string; seq: string } => {
+    const entry = hashToChain.get(h)
+    if (!entry) return { chainId: h.slice(0, 4), seq: '' }
+    const [chainId, { seq }] = [...entry.entries()].sort((a, b) => b[1].count - a[1].count)[0]
+    return { chainId, seq }
   }
 
   const groupMap = new Map<string, string[]>()
@@ -124,11 +127,15 @@ function computeGroups(hashResults: Map<string, ChainHashResult>): {
   }
 
   const groups: StructureGroup[] = Array.from(groupMap.entries()).map(([key, members]) => {
-    const chainIds = key.split(':').map(dominantChainId).join('+')
+    const chains = key.split(':').map(dominantChain)
+    const chainIds = chains.map(c => c.chainId).join('+')
+    // Show seq prefix of the first target chain; append … if the chain is longer than the prefix
+    const { seq } = chains[0]
+    const seqLabel = seq ? ` · ${seq}${seq.length >= 10 ? '…' : ''}` : ''
     return {
       id: key,
       targetHash: key.split(':')[0],
-      label: `Target (${chainIds})`,
+      label: `Target (${chainIds}${seqLabel})`,
       members: members.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
       isExpanded: true,
     }
@@ -170,17 +177,19 @@ export const useGroupStore = create<GroupStore>()(
       const batch = files.slice(i, i + BATCH)
       await Promise.all(batch.map(async (f) => {
         try {
-          // Check cache first
+          // Check cache first; skip stale entries missing chainSeqPrefixes (schema bump)
           const cached = await dbGet(f.path, f.mtime)
-          if (cached) { results.set(f.path, cached); return }
+          if (cached?.chainSeqPrefixes) { results.set(f.path, cached); return }
 
           const content = await readFile(f.path)
           const chains = parseChainSequences(content)
           const chainHashes: Record<string, string> = {}
+          const chainSeqPrefixes: Record<string, string> = {}
           for (const [chainId, data] of chains) {
             chainHashes[chainId] = await hashSeq(data.sequence)
+            chainSeqPrefixes[chainId] = data.sequence.slice(0, 10)
           }
-          const r: ChainHashResult = { path: f.path, mtime: f.mtime, chainHashes }
+          const r: ChainHashResult = { path: f.path, mtime: f.mtime, chainHashes, chainSeqPrefixes }
           results.set(f.path, r)
           await dbPut(r)
         } catch { /* skip on error */ }
