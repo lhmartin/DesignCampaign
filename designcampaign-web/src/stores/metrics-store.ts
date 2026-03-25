@@ -25,8 +25,8 @@ interface MetricsStore {
   progress: number
 
   calculateAll: (files: FileInfo[], readFile: (p: string) => Promise<string>) => Promise<void>
-  /** Try to read <stem>.json next to each PDB/CIF file; silently skip missing ones. Returns count loaded. */
-  autoLoadSidecars: (files: FileInfo[], readFile: (p: string) => Promise<string>) => Promise<number>
+  /** Try to read <stem>.json next to each PDB/CIF file; only reads paths in existingJsonPaths (avoids ENOENT). Returns count loaded. */
+  autoLoadSidecars: (files: FileInfo[], readFile: (p: string) => Promise<string>, existingJsonPaths: Set<string>) => Promise<number>
   addRow: (row: ProteinMetrics) => void
   importCSV: (text: string) => void
   importJSON: (text: string) => void
@@ -258,7 +258,7 @@ export const useMetricsStore = create<MetricsStore>()(
   },
 
   // ── Auto-load JSON sidecars ───────────────────────────────────────────────
-  autoLoadSidecars: async (files, readFile) => {
+  autoLoadSidecars: async (files, readFile, existingJsonPaths) => {
     set({ isLoadingSidecars: true })
     const BATCH = 10
     let loaded = 0
@@ -269,9 +269,9 @@ export const useMetricsStore = create<MetricsStore>()(
       const newCols: string[] = []
 
       await Promise.all(batch.map(async (f) => {
-        // Replace the extension with .json to get the sidecar path
         const jsonPath = f.path.replace(/\.(pdb|cif|mmcif)$/i, '.json')
         if (jsonPath === f.path) return // no recognised extension
+        if (!existingJsonPaths.has(jsonPath)) return // sidecar absent — skip without an IPC call
 
         try {
           const text = await readFile(jsonPath)
@@ -286,12 +286,7 @@ export const useMetricsStore = create<MetricsStore>()(
             console.warn(`[sidecars] ${jsonPath.split('/').pop()} parsed but produced no numeric metrics`)
           }
         } catch (err) {
-          // ENOENT (file not found) is expected for structures without sidecars — skip silently.
-          // Any other error is likely a bug — log it.
-          const msg = err instanceof Error ? err.message : String(err)
-          if (!msg.includes('ENOENT') && !msg.includes('no such file') && !msg.includes('NotFound')) {
-            console.error(`[sidecars] failed to read ${jsonPath}:`, err)
-          }
+          console.error(`[sidecars] failed to read ${jsonPath}:`, err)
         }
       }))
 

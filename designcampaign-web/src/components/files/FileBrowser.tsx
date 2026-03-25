@@ -113,7 +113,21 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
       ? (p: string) => window.electronAPI!.readFile(p)
       : readFileContent
     startGrouping(files, readFile)
-    autoLoadSidecars(files, readFile)
+
+    // Discover which JSON sidecars actually exist before attempting reads,
+    // so autoLoadSidecars never triggers ENOENT errors in the main process.
+    const loadSidecars = async () => {
+      let jsonSet: Set<string>
+      if (window.electronAPI && currentFolder) {
+        const jsonFiles = await window.electronAPI.listFiles(currentFolder, ['json'])
+        jsonSet = new Set(jsonFiles.map(f => f.path))
+      } else {
+        // FSA / browser mode: attempt all (no listing available)
+        jsonSet = new Set(files.map(f => f.path.replace(/\.(pdb|cif|mmcif)$/i, '.json')))
+      }
+      autoLoadSidecars(files, readFile, jsonSet)
+    }
+    loadSidecars()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files])
 
