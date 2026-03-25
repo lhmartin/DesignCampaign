@@ -109,6 +109,23 @@ function PlotTypeSelector({ value, onChange }: { value: PlotType; onChange: (t: 
 
 // ── Axis select ───────────────────────────────────────────────────────────────
 
+function DirToggle({ maximise, onChange }: { maximise: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!maximise)}
+      title={maximise ? 'Maximise (click to minimise)' : 'Minimise (click to maximise)'}
+      style={{
+        fontSize: 10, padding: '1px 5px', borderRadius: 3, cursor: 'pointer',
+        border: '1px solid var(--color-border)',
+        color: 'var(--color-text-secondary)',
+        background: 'transparent',
+      }}
+    >
+      {maximise ? '↑ max' : '↓ min'}
+    </button>
+  )
+}
+
 function AxisSelect({ value, options, onChange, label: lbl }: {
   value: string; options: string[]; onChange: (v: string) => void; label: string
 }) {
@@ -183,14 +200,16 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     const saved = localStorage.getItem('dc-plot-type')
     return (PLOT_TYPES.some(t => t.value === saved) ? saved : 'scatter') as PlotType
   })
-  const [xAxis, setXAxisRaw] = useState('')
-  const [yAxis, setYAxisRaw] = useState('')
+  const [xAxis, setXAxisRaw] = useState(() => localStorage.getItem('dc-plot-xaxis') ?? '')
+  const [yAxis, setYAxisRaw] = useState(() => localStorage.getItem('dc-plot-yaxis') ?? '')
   const [xAuto, setXAuto] = useState(true)
   const [yAuto, setYAuto] = useState(true)
   const [xMin, setXMin] = useState('')
   const [xMax, setXMax] = useState('')
   const [yMin, setYMin] = useState('')
   const [yMax, setYMax] = useState('')
+  const [paretoMaxX, setParetoMaxX] = useState(true)
+  const [paretoMaxY, setParetoMaxY] = useState(true)
 
   const prefillFromPlotly = (axis: 'x' | 'y'): [string, string] => {
     const layout = (plotRef.current as any)?._fullLayout
@@ -214,10 +233,10 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
   const handleXAuto = makeAutoHandler('x', setXAuto, setXMin, setXMax)
   const handleYAuto = makeAutoHandler('y', setYAuto, setYMin, setYMax)
 
-  const makeAxisSetter = (setRaw: (v: string) => void, setAuto: (v: boolean) => void, setMin: (v: string) => void, setMax: (v: string) => void) =>
-    (v: string) => { setRaw(v); setAuto(true); setMin(''); setMax('') }
-  const setXAxis = makeAxisSetter(setXAxisRaw, setXAuto, setXMin, setXMax)
-  const setYAxis = makeAxisSetter(setYAxisRaw, setYAuto, setYMin, setYMax)
+  const makeAxisSetter = (key: string, setRaw: (v: string) => void, setAuto: (v: boolean) => void, setMin: (v: string) => void, setMax: (v: string) => void) =>
+    (v: string) => { setRaw(v); localStorage.setItem(key, v); setAuto(true); setMin(''); setMax('') }
+  const setXAxis = makeAxisSetter('dc-plot-xaxis', setXAxisRaw, setXAuto, setXMin, setXMax)
+  const setYAxis = makeAxisSetter('dc-plot-yaxis', setYAxisRaw, setYAuto, setYMin, setYMax)
 
   const clickDepsRef = useRef({ files, setActiveFile, viewerRef })
   useEffect(() => { clickDepsRef.current = { files, setActiveFile, viewerRef } })
@@ -228,16 +247,22 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
   const clickHandlerRef = useRef<((e: Plotly.PlotMouseEvent) => void) | null>(null)
   const dblClickHandlerRef = useRef<(() => void) | null>(null)
 
-  // Initialise axes with smart defaults when columns arrive
+  // Initialise axes with smart defaults when columns arrive.
+  // Persisted selections are restored from localStorage on mount; only fall
+  // back to pickDefaults when the saved column is no longer in the dataset.
   useEffect(() => {
     if (allColumns.length === 0) return
     setXAxisRaw(prev => {
       if (prev && allColumns.includes(prev)) return prev
-      return pickDefaults(allColumns)[0]
+      const next = pickDefaults(allColumns)[0]
+      localStorage.setItem('dc-plot-xaxis', next)
+      return next
     })
     setYAxisRaw(prev => {
       if (prev && allColumns.includes(prev)) return prev
-      return pickDefaults(allColumns)[1]
+      const next = pickDefaults(allColumns)[1]
+      localStorage.setItem('dc-plot-yaxis', next)
+      return next
     })
   }, [allColumns])
 
@@ -325,8 +350,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     if (plotType === 'pareto') {
       const pts = active.map(r => ({ x: r.metrics[xAxis] ?? NaN, y: r.metrics[yAxis] ?? NaN }))
       const validPts = pts.filter(p => isFinite(p.x) && isFinite(p.y))
-      // Assume maximise both (pLDDT, rank_score are higher=better). User can interpret.
-      const frontIndices = paretoFront(validPts, { x: true, y: true })
+      const frontIndices = paretoFront(validPts, { x: paretoMaxX, y: paretoMaxY })
 
       const frontSet = new Set<number>()
       let vi = 0
@@ -477,7 +501,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     }
 
     return null
-  }, [rows, active, dimmed, xAxis, yAxis, filterRules, theme, xAuto, yAuto, xMin, xMax, yMin, yMax, plotType, isDark])
+  }, [rows, active, dimmed, xAxis, yAxis, filterRules, theme, xAuto, yAuto, xMin, xMax, yMin, yMax, plotType, paretoMaxX, paretoMaxY, isDark])
 
   const plotSpecRef = useRef(plotSpec)
   useEffect(() => { plotSpecRef.current = plotSpec }, [plotSpec])
@@ -639,7 +663,9 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
             borderTop: '1px solid var(--color-border)',
           }}>
             {showX && <AxisSelect value={xAxis} options={allColumns} onChange={setXAxis} label="X" />}
+            {showX && plotType === 'pareto' && <DirToggle maximise={paretoMaxX} onChange={setParetoMaxX} />}
             {showY && <AxisSelect value={yAxis} options={allColumns} onChange={setYAxis} label={showX ? 'Y' : 'Metric'} />}
+            {showY && plotType === 'pareto' && <DirToggle maximise={paretoMaxY} onChange={setParetoMaxY} />}
             <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-disabled)', fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap' }}>
               {active.length} pts · click to load
             </span>

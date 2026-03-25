@@ -284,8 +284,18 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
           binderChains, targetChains, atomScope, cutoff,
         }
         const workerResults = await new Promise<WorkerFileResult[]>((resolve, reject) => {
-          worker.onmessage = (e: MessageEvent<WorkerFileResult[]>) => resolve(e.data)
-          worker.onerror   = (e) => reject(new Error(e.message))
+          const onMsg = (e: MessageEvent<WorkerFileResult[]>) => {
+            worker.removeEventListener('message', onMsg)
+            worker.removeEventListener('error', onErr)
+            resolve(e.data)
+          }
+          const onErr = (e: ErrorEvent) => {
+            worker.removeEventListener('message', onMsg)
+            worker.removeEventListener('error', onErr)
+            reject(new Error(e.message))
+          }
+          worker.addEventListener('message', onMsg)
+          worker.addEventListener('error', onErr)
           worker.postMessage(input)
         })
 

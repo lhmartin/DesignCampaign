@@ -104,7 +104,6 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const resolved = path.resolve(dir)
     if (!fs.existsSync(resolved)) return []
 
-    const t0 = Date.now()
     const files: FileInfo[] = []
     const extSet = new Set(extensions.map(e => e.toLowerCase()))
 
@@ -123,7 +122,6 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
 
     scan(resolved)
     files.sort((a, b) => a.name.localeCompare(b.name))
-    console.log(`[listFiles] ${files.length} files in ${Date.now() - t0}ms`)
     return files
   })
 
@@ -279,6 +277,7 @@ export function cleanupSidecar(): void {
 
 let marimoProc: ChildProcess | null = null
 let marimoPort: number | null = null
+let marimoStarting = false
 const isMarimoRunning = () => marimoProc !== null && marimoProc.exitCode === null
 const MARIMO_CONTEXT_PATH = path.join(app.getPath('userData'), 'marimo_context.json')
 const MARIMO_METRICS_PATH = path.join(app.getPath('userData'), 'marimo_metrics.csv')
@@ -347,7 +346,12 @@ ipcMain.handle('marimo:start', async (_evt, notebookPath: string) => {
   if (isMarimoRunning() && marimoPort !== null) {
     return { port: marimoPort, contextPath: MARIMO_CONTEXT_PATH }
   }
+  // Serialize concurrent starts — a second call while the first is still
+  // starting would otherwise race to overwrite marimoProc/marimoPort.
+  if (marimoStarting) throw new Error('Marimo is already starting')
+  marimoStarting = true
 
+  try {
   if (marimoProc) {
     marimoProc.kill()
     marimoProc = null
@@ -356,15 +360,15 @@ ipcMain.handle('marimo:start', async (_evt, notebookPath: string) => {
 
   seedNotebook(notebookPath)
 
-  // Hold a listening server on the chosen port to prevent race-condition
-  // port theft between discovery and Marimo's bind.
+  // Ask the OS for a free port by listening on 0, then immediately close.
+  // This minimises (but does not eliminate) the window in which another
+  // process could claim the port before Marimo binds it.
   const portServer = net.createServer()
   const port = await new Promise<number>((resolve, reject) => {
     portServer.once('listening', () => resolve((portServer.address() as net.AddressInfo).port))
     portServer.once('error', reject)
     portServer.listen(0, '127.0.0.1') // 0 = OS-assigned free port
   })
-  // Release the port just before spawning so Marimo can bind it
   await new Promise<void>(r => portServer.close(() => r()))
 
   const pythonExe = getPythonExe()
@@ -403,6 +407,9 @@ ipcMain.handle('marimo:start', async (_evt, notebookPath: string) => {
   await waitForMarimoReady(port)
   marimoPort = port
   return { port, contextPath: MARIMO_CONTEXT_PATH }
+  } finally {
+    marimoStarting = false
+  }
 })
 
 ipcMain.handle('marimo:stop', () => {
@@ -426,16 +433,18 @@ function csvCell(v: string): string {
 const CONTEXT_MAX_BYTES = 50 * 1024 * 1024 // 50 MB guard
 
 ipcMain.handle('marimo:update-context', async (_evt, context: MarimoUpdateContext) => {
-  const serialised = JSON.stringify(context, null, 2)
-  if (Buffer.byteLength(serialised, 'utf-8') > CONTEXT_MAX_BYTES) {
+  // Check compact size first to avoid materialising a large pretty-printed string
+  // only to throw it away.
+  if (Buffer.byteLength(JSON.stringify(context), 'utf-8') > CONTEXT_MAX_BYTES) {
     throw new Error('marimo:update-context payload exceeds 50 MB limit')
   }
-  fs.writeFileSync(MARIMO_CONTEXT_PATH, serialised, 'utf-8')
+  fs.writeFileSync(MARIMO_CONTEXT_PATH, JSON.stringify(context, null, 2), 'utf-8')
 
   const { metricsRows: rows } = context
   if (rows.length > 0) {
     const allCols = Array.from(new Set(rows.flatMap(r => Object.keys(r.metrics))))
-    const header = ['name', 'filePath', ...allCols].join(',')
+    // Quote all header fields — column names may contain commas or spaces.
+    const header = ['name', 'filePath', ...allCols].map(csvCell).join(',')
     const lines = rows.map(r => {
       const vals = allCols.map(c => (r.metrics[c] === undefined ? '' : String(r.metrics[c])))
       return [csvCell(r.name), csvCell(r.filePath ?? ''), ...vals].join(',')

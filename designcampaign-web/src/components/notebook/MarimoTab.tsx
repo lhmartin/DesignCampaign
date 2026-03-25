@@ -19,7 +19,7 @@ export function MarimoTab() {
   const [pathInput, setPathInput] = useState('')
   const installLogRef = useRef<HTMLDivElement>(null)
   const installCleanupRef = useRef<(() => void) | null>(null)
-  const { contextPath } = useMarimoContext()
+  const { contextPath } = useMarimoContext(state === 'running')
 
   // Clean up install progress listener if component unmounts mid-install
   useEffect(() => () => { installCleanupRef.current?.() }, [])

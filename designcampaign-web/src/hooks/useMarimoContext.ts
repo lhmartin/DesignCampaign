@@ -11,9 +11,10 @@ interface MarimoContextPaths {
 /**
  * Watches app state and writes a dc_context.json + marimo_metrics.csv to the
  * userData directory whenever state changes (debounced 500 ms).
+ * Pass `enabled=false` when Marimo is not running to suppress unnecessary writes.
  * Returns the paths so the MarimoTab toolbar can display them.
  */
-export function useMarimoContext(): MarimoContextPaths {
+export function useMarimoContext(enabled: boolean): MarimoContextPaths {
   const [paths, setPaths] = useState<MarimoContextPaths>({ contextPath: null, metricsPath: null })
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -26,7 +27,7 @@ export function useMarimoContext(): MarimoContextPaths {
   const rows = useMetricsStore(s => s.rows)
 
   useEffect(() => {
-    if (!window.electronAPI) return
+    if (!enabled || !window.electronAPI) return
 
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(async () => {
@@ -59,7 +60,7 @@ export function useMarimoContext(): MarimoContextPaths {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [activeFile, currentFolder, files, rules, rankingMode, rankingMetrics, rows])
+  }, [enabled, activeFile, currentFolder, files, rules, rankingMode, rankingMetrics, rows])
 
   return paths
 }
