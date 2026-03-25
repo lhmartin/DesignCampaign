@@ -73,6 +73,7 @@ export async function runSetup(onProgress: (msg: string) => void): Promise<void>
       ['sync', '--directory', projectDir, '--python', '3.11', '--no-dev'],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
         env: { ...process.env, UV_PYTHON_DOWNLOADS: 'automatic' },
       },
     )
@@ -108,7 +109,7 @@ export async function installPackages(packages: string[], onProgress: (msg: stri
     const proc = spawn(
       uvPath,
       ['pip', 'install', ...packages, '--python', pythonExe],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
     )
 
     const onLine = (line: string) => { if (line.trim()) onProgress(line.trim()) }

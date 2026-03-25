@@ -222,7 +222,7 @@ function getSidecar(): ChildProcess {
     throw new Error('Python environment is not set up. Open the app and complete the Python setup first.')
   }
 
-  sidecarProcess = spawn(getPythonExe(), [getSidecarScriptPath()], { stdio: ['pipe', 'pipe', 'inherit'] })
+  sidecarProcess = spawn(getPythonExe(), [getSidecarScriptPath()], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
 
   const rl = createInterface({ input: sidecarProcess.stdout! })
   rl.on('line', (line: string) => {
@@ -378,6 +378,7 @@ ipcMain.handle('marimo:start', async (_evt, notebookPath: string) => {
     ['-m', 'marimo', 'edit', '--headless', '--no-token', '--port', String(port), notebookPath],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
       // Only expose safe env vars — avoid leaking API keys or secrets.
       // Cast via spread so TS's ProcessEnv augmentation doesn't complain.
       env: {
