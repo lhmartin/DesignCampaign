@@ -20,7 +20,7 @@ interface ColorScaleDef {
   id: string
   label: string
   plotly: string | [number, string][]
-  css: string // for the preview swatch
+  css: string
 }
 
 const COLOR_SCALES: ColorScaleDef[] = [
@@ -168,8 +168,8 @@ function DirToggle({ maximise, onChange }: { maximise: boolean; onChange: (v: bo
   )
 }
 
-function AxisSelect({ value, options, onChange, label: lbl }: {
-  value: string; options: string[]; onChange: (v: string) => void; label: string
+function AxisSelect({ value, options, onChange, label: lbl, allowNone }: {
+  value: string; options: string[]; onChange: (v: string) => void; label: string; allowNone?: string
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -189,6 +189,7 @@ function AxisSelect({ value, options, onChange, label: lbl }: {
           backgroundRepeat: 'no-repeat', backgroundPosition: 'right 5px center',
         }}
       >
+        {allowNone && <option value="">{allowNone}</option>}
         {options.map(c => <option key={c} value={c}>{shortLabel(c)}</option>)}
       </select>
     </div>
@@ -256,7 +257,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
   const setColorAxis = (v: string) => { setColorAxisRaw(v); localStorage.setItem('dc-plot-color', v) }
   const [colorScaleId, setColorScaleIdRaw] = useState(() => {
     const saved = localStorage.getItem('dc-plot-colorscale')
-    return COLOR_SCALES.some(s => s.id === saved) ? saved! : 'teal'
+    return COLOR_SCALES.some(s => s.id === saved) ? saved! : COLOR_SCALES[0].id
   })
   const setColorScaleId = (v: string) => { setColorScaleIdRaw(v); localStorage.setItem('dc-plot-colorscale', v) }
 
@@ -387,18 +388,19 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
         type: 'scatter', mode: 'markers', name: 'structures',
         x: active.map(r => r.metrics[xAxis] ?? null), y: active.map(r => r.metrics[yAxis] ?? null),
         text: active.map(r => r.name), customdata: active.map(r => r.filePath ?? ''),
-        marker: colorValues ? {
-          color: colorValues,
-          colorscale: colorScale,
-          showscale: true,
-          colorbar: {
-            title: { text: shortLabel(colorAxis), font: { size: 9, color: theme.font }, side: 'right' },
-            thickness: 10, len: 0.75, x: 1.02,
-            tickfont: { size: 8, color: theme.tick },
-            outlinewidth: 0,
-          },
+        marker: {
+          color: colorValues ?? theme.dot,
           size: 7, opacity: 0.85, line: { color: 'rgba(0,0,0,0.2)', width: 0.5 },
-        } : { color: theme.dot, size: 7, opacity: 0.85, line: { color: 'rgba(0,0,0,0.2)', width: 0.5 } },
+          ...(colorValues && {
+            colorscale: colorScale, showscale: true,
+            colorbar: {
+              title: { text: shortLabel(colorAxis), font: { size: 9, color: theme.font }, side: 'right' },
+              thickness: 10, len: 0.75, x: 1.02,
+              tickfont: { size: 8, color: theme.tick },
+              outlinewidth: 0,
+            },
+          }),
+        },
         hovertemplate: colorValues
           ? `<b>%{text}</b><br>${shortLabel(xAxis)}: %{x:.3f}<br>${shortLabel(yAxis)}: %{y:.3f}<br>${shortLabel(colorAxis)}: %{marker.color:.3f}<extra></extra>`
           : `<b>%{text}</b><br>${shortLabel(xAxis)}: %{x:.3f}<br>${shortLabel(yAxis)}: %{y:.3f}<extra></extra>`,
@@ -735,27 +737,9 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
             {showY && plotType === 'pareto' && <DirToggle maximise={paretoMaxY} onChange={setParetoMaxY} />}
             {plotType === 'scatter' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--color-accent)', opacity: 0.8 }}>
-                  Color
-                </span>
-                <select
-                  value={colorAxis}
-                  onChange={e => setColorAxis(e.target.value)}
-                  style={{
-                    fontSize: 11, fontFamily: 'Outfit, sans-serif',
-                    color: 'var(--color-text-primary)', background: 'var(--color-secondary-bg)',
-                    border: '1px solid var(--color-border)', borderRadius: 5,
-                    padding: '2px 20px 2px 6px', outline: 'none', cursor: 'pointer',
-                    appearance: 'none', WebkitAppearance: 'none',
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2300c8a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 5px center',
-                  }}
-                >
-                  <option value="">— none —</option>
-                  {allColumns.map(c => <option key={c} value={c}>{shortLabel(c)}</option>)}
-                </select>
+                <AxisSelect value={colorAxis} options={allColumns} onChange={setColorAxis} label="Color" allowNone="— none —" />
                 {colorAxis && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginLeft: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                     {COLOR_SCALES.map(s => (
                       <button
                         key={s.id}
