@@ -14,6 +14,48 @@ interface ScatterPlotProps {
 
 type PlotType = 'scatter' | 'histogram' | 'violin' | 'ranked' | 'pareto'
 
+// ── Color scales ──────────────────────────────────────────────────────────────
+
+interface ColorScaleDef {
+  id: string
+  label: string
+  plotly: string | [number, string][]
+  css: string // for the preview swatch
+}
+
+const COLOR_SCALES: ColorScaleDef[] = [
+  {
+    id: 'teal', label: 'Teal',
+    plotly: [[0, '#1e3a5f'], [0.5, '#00c8a8'], [1, '#f0fff8']],
+    css: 'linear-gradient(to right, #1e3a5f, #00c8a8, #f0fff8)',
+  },
+  {
+    id: 'Viridis', label: 'Viridis',
+    plotly: 'Viridis',
+    css: 'linear-gradient(to right, #440154, #31688e, #35b779, #fde725)',
+  },
+  {
+    id: 'Plasma', label: 'Plasma',
+    plotly: 'Plasma',
+    css: 'linear-gradient(to right, #0d0887, #cc4778, #f0f921)',
+  },
+  {
+    id: 'Inferno', label: 'Inferno',
+    plotly: 'Inferno',
+    css: 'linear-gradient(to right, #000004, #bc3754, #fcffa4)',
+  },
+  {
+    id: 'RdBu', label: 'RdBu',
+    plotly: 'RdBu',
+    css: 'linear-gradient(to right, #67001f, #f7f7f7, #053061)',
+  },
+  {
+    id: 'Turbo', label: 'Turbo',
+    plotly: 'Turbo',
+    css: 'linear-gradient(to right, #30123b, #28bbec, #a3fc3d, #fb8022, #7a0403)',
+  },
+]
+
 // Priority-ordered default axis pairs: [xCol, yCol]
 const DEFAULT_PAIRS: [string, string][] = [
   ['mean_plddt', 'rank_score'],
@@ -210,6 +252,13 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
   const [yMax, setYMax] = useState('')
   const [paretoMaxX, setParetoMaxX] = useState(true)
   const [paretoMaxY, setParetoMaxY] = useState(true)
+  const [colorAxis, setColorAxisRaw] = useState(() => localStorage.getItem('dc-plot-color') ?? '')
+  const setColorAxis = (v: string) => { setColorAxisRaw(v); localStorage.setItem('dc-plot-color', v) }
+  const [colorScaleId, setColorScaleIdRaw] = useState(() => {
+    const saved = localStorage.getItem('dc-plot-colorscale')
+    return COLOR_SCALES.some(s => s.id === saved) ? saved! : 'teal'
+  })
+  const setColorScaleId = (v: string) => { setColorScaleIdRaw(v); localStorage.setItem('dc-plot-colorscale', v) }
 
   const prefillFromPlotly = (axis: 'x' | 'y'): [string, string] => {
     const layout = (plotRef.current as any)?._fullLayout
@@ -321,6 +370,11 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
 
     // ── Scatter ──────────────────────────────────────────────────────────────
     if (plotType === 'scatter') {
+      const colorValues = colorAxis && allColumns.includes(colorAxis)
+        ? active.map(r => r.metrics[colorAxis] ?? null)
+        : null
+      const colorScale = (COLOR_SCALES.find(s => s.id === colorScaleId) ?? COLOR_SCALES[0]).plotly
+
       const traces: object[] = []
       if (dimmed.length > 0) traces.push({
         type: 'scatter', mode: 'markers', name: 'filtered out',
@@ -333,8 +387,21 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
         type: 'scatter', mode: 'markers', name: 'structures',
         x: active.map(r => r.metrics[xAxis] ?? null), y: active.map(r => r.metrics[yAxis] ?? null),
         text: active.map(r => r.name), customdata: active.map(r => r.filePath ?? ''),
-        marker: { color: theme.dot, size: 7, opacity: 0.85, line: { color: 'rgba(0,0,0,0.2)', width: 0.5 } },
-        hovertemplate: `<b>%{text}</b><br>${shortLabel(xAxis)}: %{x:.3f}<br>${shortLabel(yAxis)}: %{y:.3f}<extra></extra>`,
+        marker: colorValues ? {
+          color: colorValues,
+          colorscale: colorScale,
+          showscale: true,
+          colorbar: {
+            title: { text: shortLabel(colorAxis), font: { size: 9, color: theme.font }, side: 'right' },
+            thickness: 10, len: 0.75, x: 1.02,
+            tickfont: { size: 8, color: theme.tick },
+            outlinewidth: 0,
+          },
+          size: 7, opacity: 0.85, line: { color: 'rgba(0,0,0,0.2)', width: 0.5 },
+        } : { color: theme.dot, size: 7, opacity: 0.85, line: { color: 'rgba(0,0,0,0.2)', width: 0.5 } },
+        hovertemplate: colorValues
+          ? `<b>%{text}</b><br>${shortLabel(xAxis)}: %{x:.3f}<br>${shortLabel(yAxis)}: %{y:.3f}<br>${shortLabel(colorAxis)}: %{marker.color:.3f}<extra></extra>`
+          : `<b>%{text}</b><br>${shortLabel(xAxis)}: %{x:.3f}<br>${shortLabel(yAxis)}: %{y:.3f}<extra></extra>`,
       })
       return {
         traces, layout: {
@@ -501,7 +568,7 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
     }
 
     return null
-  }, [rows, active, dimmed, xAxis, yAxis, filterRules, theme, xAuto, yAuto, xMin, xMax, yMin, yMax, plotType, paretoMaxX, paretoMaxY, isDark])
+  }, [rows, active, dimmed, xAxis, yAxis, colorAxis, colorScaleId, allColumns, filterRules, theme, xAuto, yAuto, xMin, xMax, yMin, yMax, plotType, paretoMaxX, paretoMaxY, isDark])
 
   const plotSpecRef = useRef(plotSpec)
   useEffect(() => { plotSpecRef.current = plotSpec }, [plotSpec])
@@ -666,6 +733,47 @@ export function ScatterPlot({ viewerRef }: ScatterPlotProps) {
             {showX && plotType === 'pareto' && <DirToggle maximise={paretoMaxX} onChange={setParetoMaxX} />}
             {showY && <AxisSelect value={yAxis} options={allColumns} onChange={setYAxis} label={showX ? 'Y' : 'Metric'} />}
             {showY && plotType === 'pareto' && <DirToggle maximise={paretoMaxY} onChange={setParetoMaxY} />}
+            {plotType === 'scatter' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--color-accent)', opacity: 0.8 }}>
+                  Color
+                </span>
+                <select
+                  value={colorAxis}
+                  onChange={e => setColorAxis(e.target.value)}
+                  style={{
+                    fontSize: 11, fontFamily: 'Outfit, sans-serif',
+                    color: 'var(--color-text-primary)', background: 'var(--color-secondary-bg)',
+                    border: '1px solid var(--color-border)', borderRadius: 5,
+                    padding: '2px 20px 2px 6px', outline: 'none', cursor: 'pointer',
+                    appearance: 'none', WebkitAppearance: 'none',
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2300c8a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+                    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 5px center',
+                  }}
+                >
+                  <option value="">— none —</option>
+                  {allColumns.map(c => <option key={c} value={c}>{shortLabel(c)}</option>)}
+                </select>
+                {colorAxis && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginLeft: 2 }}>
+                    {COLOR_SCALES.map(s => (
+                      <button
+                        key={s.id}
+                        title={s.label}
+                        onClick={() => setColorScaleId(s.id)}
+                        style={{
+                          width: 28, height: 12, padding: 0, border: 'none', borderRadius: 2, cursor: 'pointer',
+                          background: s.css,
+                          outline: colorScaleId === s.id ? '2px solid var(--color-accent)' : '2px solid transparent',
+                          outlineOffset: 1,
+                          transition: 'outline-color 0.1s',
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-disabled)', fontFamily: 'JetBrains Mono, monospace', whiteSpace: 'nowrap' }}>
               {active.length} pts · click to load
             </span>
