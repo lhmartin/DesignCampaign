@@ -617,7 +617,6 @@ export function SelectionPanel() {
             }}>
               Interface Analysis
             </div>
-            {/* Interface-level summary: h-bonds + clashes belong to the whole interface */}
             <div style={{ display: 'flex', gap: 8, padding: '6px 12px', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg)', alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontWeight: 500 }}>
                 <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--color-text-primary)', fontWeight: 600 }}>{nHBonds}</span>

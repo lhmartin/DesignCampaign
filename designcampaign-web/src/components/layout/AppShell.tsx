@@ -61,8 +61,6 @@ export function AppShell() {
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
   }, [isDark])
 
-  // When the active file changes, hydrate the interface store from batch results
-  // if they exist — so the Selection tab shows immediately without recalculating.
   useEffect(() => {
     if (!activeFile) return
     const batch = useBatchInterfaceStore.getState().results[activeFile]

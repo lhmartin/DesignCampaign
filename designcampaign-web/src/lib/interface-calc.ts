@@ -146,8 +146,8 @@ export function computeContacts(
     }
   }
 
-  const paratopeProps = aggregateResidueProps([...paratope].map(k => binderResNames.get(k) ?? ''))
-  const epitopeProps  = aggregateResidueProps([...epitope].map(k => targetResNames.get(k) ?? ''))
+  const paratopeProps = aggregateResidueProps(Array.from(paratope, k => binderResNames.get(k) ?? ''))
+  const epitopeProps  = aggregateResidueProps(Array.from(epitope,  k => targetResNames.get(k) ?? ''))
 
   return { paratope, epitope, nContacts, nHBonds, nClashes, paratopeProps, epitopeProps }
 }
