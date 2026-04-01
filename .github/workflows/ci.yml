@@ -8,13 +8,13 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22.x'
           cache: npm
           cache-dependency-path: designcampaign-web/package-lock.json
 
@@ -27,13 +27,13 @@ jobs:
         working-directory: designcampaign-web
 
   build-mac:
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22.x'
           cache: npm
           cache-dependency-path: designcampaign-web/package-lock.json
 
@@ -46,13 +46,13 @@ jobs:
         working-directory: designcampaign-web
 
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22.x'
           cache: npm
           cache-dependency-path: designcampaign-web/package-lock.json
 

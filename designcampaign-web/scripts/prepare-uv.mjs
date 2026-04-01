@@ -27,22 +27,8 @@ const OUT_DIR = join(PROJECT_ROOT, 'uv-dist')
 const IS_WIN = process.platform === 'win32'
 const IS_MAC = process.platform === 'darwin'
 
-async function fetchLatestVersion() {
-  // Follow the /releases/latest redirect — the Location header contains the tag.
-  // Avoids the 60 req/hour rate limit on the JSON API endpoint.
-  return new Promise((resolve, reject) => {
-    https.get(
-      'https://github.com/astral-sh/uv/releases/latest',
-      { headers: { 'User-Agent': 'designcampaign-build' } },
-      res => {
-        const loc = res.headers.location ?? ''
-        const match = loc.match(/\/tag\/(.+)$/)
-        if (match) { res.resume(); resolve(match[1]); return }
-        reject(new Error(`Could not extract version from redirect location: "${loc}" (status ${res.statusCode})`))
-      }
-    ).on('error', reject)
-  })
-}
+// Pin to a tested uv release. Bump intentionally when upgrading.
+const UV_VERSION = '0.11.2'
 
 function download(url, destPath) {
   return new Promise((resolve, reject) => {
@@ -110,8 +96,7 @@ async function main() {
       return
     }
 
-    console.log('[prepare-uv] Fetching latest uv version...')
-    const version = await fetchLatestVersion()
+    const version = UV_VERSION
     const base = `https://github.com/astral-sh/uv/releases/download/${version}`
 
     console.log(`[prepare-uv] Downloading uv ${version} for darwin (x64 + arm64)...`)
@@ -137,8 +122,7 @@ async function main() {
     return
   }
 
-  console.log('[prepare-uv] Fetching latest uv version...')
-  const version = await fetchLatestVersion()
+  const version = UV_VERSION
   const base = `https://github.com/astral-sh/uv/releases/download/${version}`
   console.log(`[prepare-uv] Downloading uv ${version} for ${process.platform}/${process.arch}...`)
 
