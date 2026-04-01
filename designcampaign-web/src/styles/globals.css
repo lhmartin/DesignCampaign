@@ -68,7 +68,7 @@
   --color-accent-subtle:    rgba(0,200,168,0.09);
   --color-text-primary:     #c4d4ec;
   --color-text-secondary:   #7090bb;  /* was #627eaa — 4.3:1 → 5.3:1 contrast */
-  --color-text-disabled:    #5a7399;  /* was #3d5070 — 2.0:1 → 3.6:1 contrast */
+  --color-text-disabled:    var(--color-text-secondary);  /* raised from #5a7399 — now passes WCAG AA for small text */
   --color-viewer-bg:        #0c1120;
   --color-table-alt-row:    #1c2340;
   --color-table-header:     #263555;

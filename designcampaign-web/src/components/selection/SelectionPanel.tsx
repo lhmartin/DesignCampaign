@@ -538,11 +538,11 @@ export function SelectionPanel() {
     <div className="flex flex-col h-full text-xs text-[var(--color-text-primary)]">
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--color-border)] shrink-0">
-        <span className="font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide text-[10px]">
+        <span className="font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide text-[11px]">
           Selection
         </span>
         {totalSelected > 0 && (
-          <span className="ml-auto px-1.5 py-0.5 rounded-full bg-[var(--color-accent)]/15 text-[var(--color-accent)] font-mono text-[10px]">
+          <span className="ml-auto px-1.5 py-0.5 rounded-full bg-[var(--color-accent)]/15 text-[var(--color-accent)] font-mono text-[11px]">
             {totalSelected}
           </span>
         )}
@@ -567,8 +567,8 @@ export function SelectionPanel() {
         <div className="flex flex-col items-center justify-center flex-1 text-[var(--color-text-disabled)] gap-2 px-6 text-center">
           <MousePointer2 size={28} className="opacity-40" />
           <p>Click residues in the 3D viewer to select them.</p>
-          <p className="text-[10px]">Hold <kbd className="px-1 py-0.5 rounded bg-[var(--color-secondary-bg)] border border-[var(--color-border)] font-mono">Ctrl</kbd> to add/remove individual residues.</p>
-          <p className="text-[10px] mt-1 text-[var(--color-text-disabled)]">Use the <strong>Interface</strong> button in the viewer toolbar to detect epitope &amp; paratope residues.</p>
+          <p className="text-[11px]">Hold <kbd className="px-1 py-0.5 rounded bg-[var(--color-secondary-bg)] border border-[var(--color-border)] font-mono">Ctrl</kbd> to add/remove individual residues.</p>
+          <p className="text-[11px] mt-1 text-[var(--color-text-disabled)]">Use the <strong>Interface</strong> button in the viewer toolbar to detect epitope &amp; paratope residues.</p>
         </div>
       )}
 
@@ -624,11 +624,11 @@ export function SelectionPanel() {
             {[...byChain.entries()].map(([chain, ids]) => (
               <div key={chain}>
                 <div className="sticky top-0 px-3 py-1 bg-[var(--color-secondary-bg)] border-b border-[var(--color-border)] flex items-center gap-2">
-                  <span className="font-semibold text-[var(--color-text-secondary)] text-[10px] uppercase tracking-wide">
+                  <span className="font-semibold text-[var(--color-text-secondary)] text-[11px] uppercase tracking-wide">
                     Chain {chain}
                   </span>
-                  <span className="text-[10px] text-[var(--color-text-disabled)]">{ids.length} residue{ids.length !== 1 ? 's' : ''}</span>
-                  <span className="ml-auto text-[10px] font-mono text-[var(--color-text-secondary)]">
+                  <span className="text-[11px] text-[var(--color-text-disabled)]">{ids.length} residue{ids.length !== 1 ? 's' : ''}</span>
+                  <span className="ml-auto text-[11px] font-mono text-[var(--color-text-secondary)]">
                     {compactRanges(ids)}
                   </span>
                 </div>
@@ -643,7 +643,7 @@ export function SelectionPanel() {
                         useSelectionStore.setState({ selectedResidues: next })
                       }}
                       title={`Remove ${chain}:${id} from selection`}
-                      className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--color-accent)]/10 text-[var(--color-accent)] border border-[var(--color-accent)]/25 hover:bg-red-50 hover:border-red-200 hover:text-red-600 dark:hover:bg-red-950/30 transition-colors"
+                      className="px-1.5 py-0.5 rounded text-[11px] font-mono bg-[var(--color-accent)]/10 text-[var(--color-accent)] border border-[var(--color-accent)]/25 hover:bg-red-50 hover:border-red-200 hover:text-red-600 dark:hover:bg-red-950/30 transition-colors"
                     >
                       {id}
                     </button>

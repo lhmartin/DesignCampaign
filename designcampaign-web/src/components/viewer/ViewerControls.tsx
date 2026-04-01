@@ -137,7 +137,7 @@ function SelectionBadge() {
       borderRadius: 10,
       background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
       border: '1px solid color-mix(in srgb, var(--color-accent) 30%, transparent)',
-      fontSize: 10,
+      fontSize: 11,
       color: 'var(--color-accent)',
       fontFamily: 'JetBrains Mono, monospace',
       whiteSpace: 'nowrap',

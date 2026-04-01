@@ -179,14 +179,14 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
             <button
               onClick={() => setViewMode('tree')}
               title="Folder tree view"
-              className={`flex items-center px-1.5 py-0.5 rounded text-[10px] transition-colors ${viewMode === 'tree' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}`}
+              className={`flex items-center px-1.5 py-0.5 rounded text-[11px] transition-colors ${viewMode === 'tree' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}`}
             >
               <FolderOpen size={13} />
             </button>
             <button
               onClick={() => setViewMode('groups')}
               title="Sequence-identity groups view"
-              className={`flex items-center px-1.5 py-0.5 rounded text-[10px] transition-colors ${viewMode === 'groups' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}`}
+              className={`flex items-center px-1.5 py-0.5 rounded text-[11px] transition-colors ${viewMode === 'groups' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}`}
             >
               <LayoutGrid size={13} />
             </button>
@@ -196,7 +196,7 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
 
       {/* Folder path */}
       {currentFolder && (
-        <div className="px-2 py-1 text-[10px] text-[var(--color-text-secondary)] truncate border-b border-[var(--color-border)] shrink-0 font-mono">
+        <div className="px-2 py-1 text-[11px] text-[var(--color-text-secondary)] truncate border-b border-[var(--color-border)] shrink-0 font-mono">
           {currentFolder.split(/[/\\]/).pop() ?? currentFolder}
         </div>
       )}
@@ -232,7 +232,7 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
                 style={{ width: `${Math.round(progress * 100)}%` }}
               />
             </div>
-            <span className="text-[10px] text-[var(--color-text-secondary)] shrink-0">Grouping…</span>
+            <span className="text-[11px] text-[var(--color-text-secondary)] shrink-0">Grouping…</span>
           </div>
         </div>
       )}
@@ -357,12 +357,12 @@ function DirNodeView({
         className="w-full text-left flex items-center gap-1.5 px-2 py-1 hover:bg-[var(--color-secondary-bg)] transition-colors"
         style={{ paddingLeft: `${8 + depth * 12}px` }}
       >
-        <span className="text-[10px] w-3 shrink-0 text-[var(--color-text-disabled)]">
+        <span className="text-[11px] w-3 shrink-0 text-[var(--color-text-disabled)]">
           {isOpen ? '▼' : '▶'}
         </span>
         <FolderIcon size={12} className="shrink-0 text-[var(--color-text-secondary)]" />
         <span className="text-xs text-[var(--color-text-primary)] truncate flex-1">{node.name}</span>
-        <span className="text-[10px] text-[var(--color-text-disabled)] shrink-0">{totalFiles}</span>
+        <span className="text-[11px] text-[var(--color-text-disabled)] shrink-0">{totalFiles}</span>
       </button>
 
       {isOpen && (
@@ -378,7 +378,7 @@ function DirNodeView({
           ))}
           {hiddenCount > 0 && (
             <div
-              className="text-[10px] text-[var(--color-text-disabled)] py-1 italic"
+              className="text-[11px] text-[var(--color-text-disabled)] py-1 italic"
               style={{ paddingLeft: `${8 + (depth + 1) * 12}px` }}
             >
               {hiddenCount} more — use search to find
@@ -438,7 +438,7 @@ function FileRow({
         {file.name}
       </span>
       <span
-        className={`text-[10px] shrink-0 ${isLarge ? 'text-amber-500' : 'text-[var(--color-text-disabled)]'}`}
+        className={`text-[11px] shrink-0 ${isLarge ? 'text-amber-500' : 'text-[var(--color-text-disabled)]'}`}
         title={isLarge ? 'Large file — may be slow to load' : undefined}
       >
         {formatFileSize(file.size)}

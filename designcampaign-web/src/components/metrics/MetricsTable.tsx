@@ -319,7 +319,7 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
         cell: info => {
           const v = info.getValue()
           return v !== undefined ? (
-            <span className="text-xs tabular-nums">{typeof v === 'number' ? v.toFixed(2) : v}</span>
+            <span className="text-xs tabular-nums font-medium">{typeof v === 'number' ? v.toFixed(2) : v}</span>
           ) : <span className="text-xs text-[var(--color-text-disabled)]">—</span>
         },
         sortingFn: 'alphanumeric',
@@ -505,7 +505,7 @@ export function MetricsTable({ viewerRef }: MetricsTableProps) {
 
       {/* Status bar */}
       {filteredRows.length > 0 && (
-        <div className="px-2 py-1 text-[10px] text-[var(--color-text-secondary)] border-t border-[var(--color-border)] shrink-0">
+        <div className="px-2 py-1 text-[11px] text-[var(--color-text-secondary)] border-t border-[var(--color-border)] shrink-0">
           {filteredRows.length} of {rows.length} rows · double-click row to load · double-click name to rename
         </div>
       )}
