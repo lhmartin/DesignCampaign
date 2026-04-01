@@ -522,6 +522,7 @@ export function SelectionPanel() {
   const nClashes       = useInterfaceStore(s => s.nClashes)
   const paratopeProps  = useInterfaceStore(s => s.paratopeProps)
   const epitopeProps   = useInterfaceStore(s => s.epitopeProps)
+  const cutoff         = useInterfaceStore(s => s.cutoff)
   const { activeFile } = useFileStore()
   const selections = useNamedSelectionStore(s => s.selections)
 
@@ -617,7 +618,7 @@ export function SelectionPanel() {
               Interface Analysis
             </div>
             {/* Interface-level summary: h-bonds + clashes belong to the whole interface */}
-            <div style={{ display: 'flex', gap: 8, padding: '6px 12px', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
+            <div style={{ display: 'flex', gap: 8, padding: '6px 12px', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg)', alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontWeight: 500 }}>
                 <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--color-text-primary)', fontWeight: 600 }}>{nHBonds}</span>
                 {' '}H-bonds
@@ -626,6 +627,9 @@ export function SelectionPanel() {
               <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontWeight: 500 }}>
                 <span style={{ fontFamily: 'JetBrains Mono, monospace', color: nClashes > 0 ? '#f59e0b' : 'var(--color-text-primary)', fontWeight: 600 }}>{nClashes}</span>
                 {' '}clash{nClashes !== 1 ? 'es' : ''}
+              </span>
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-text-disabled)', fontFamily: 'JetBrains Mono, monospace' }}>
+                {cutoff} Å cutoff
               </span>
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>

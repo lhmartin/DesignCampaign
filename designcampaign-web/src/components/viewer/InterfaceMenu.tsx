@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { useInterfaceStore } from '@/stores/interface-store'
+import { useUIStore } from '@/stores/ui-store'
 import { useGroupStore } from '@/stores/group-store'
 import { useFileStore } from '@/stores/file-store'
 import { useMetricsStore } from '@/stores/metrics-store'
@@ -236,6 +237,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
       }
       const { paratope, epitope, nHBonds, nClashes, paratopeProps, epitopeProps } = computeContacts(binderAtoms, targetAtoms, store.cutoff)
       store.setResults(paratope, epitope, nHBonds, nClashes, paratopeProps, epitopeProps)
+      useUIStore.getState().setActiveTab('selection')
       // Apply interface colour theme using the shared helper from MolstarViewer
       await applyToAllRepresentations(plugin, (old: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
         ...old,

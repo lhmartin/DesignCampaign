@@ -16,6 +16,7 @@ import { ChatPanel } from '@/components/chat/ChatPanel'
 import { MarimoTab } from '@/components/notebook/MarimoTab'
 import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
+import { useUIStore } from '@/stores/ui-store'
 import { UpdateBanner } from './UpdateBanner'
 import { PythonSetupModal } from './PythonSetupModal'
 import { OnboardingTour } from './OnboardingTour'
@@ -37,6 +38,7 @@ const cardStyle: React.CSSProperties = {
 export function AppShell() {
   const viewerRef = useRef<MolstarViewerHandle>(null)
   const { activeFile, currentFolder, setFolder } = useFileStore()
+  const { activeTab, setActiveTab } = useUIStore()
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
   const [showPythonSetup, setShowPythonSetup] = useState(false)
   const [rightPanelMode, setRightPanelMode] = useState<'viewer' | 'notebook'>('viewer')
@@ -207,7 +209,8 @@ export function AppShell() {
               Tabs root is flex-col so TabsContent children can expand with flex-1.
             */}
             <Tabs
-              defaultValue="files"
+              value={activeTab}
+              onValueChange={setActiveTab}
               style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
             >
               <TabsList>
