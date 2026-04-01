@@ -628,8 +628,9 @@ export function SelectionPanel() {
                 <span style={{ fontFamily: 'JetBrains Mono, monospace', color: nClashes > 0 ? '#f59e0b' : 'var(--color-text-primary)', fontWeight: 600 }}>{nClashes}</span>
                 {' '}clash{nClashes !== 1 ? 'es' : ''}
               </span>
-              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-text-disabled)', fontFamily: 'JetBrains Mono, monospace' }}>
-                {cutoff} Å cutoff
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-text-secondary)', fontFamily: 'JetBrains Mono, monospace' }}>
+                <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{cutoff} Å</span>
+                {' '}cutoff
               </span>
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
