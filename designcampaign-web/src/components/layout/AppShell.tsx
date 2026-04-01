@@ -17,7 +17,7 @@ import { MarimoTab } from '@/components/notebook/MarimoTab'
 import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { useUIStore } from '@/stores/ui-store'
-import { useInterfaceStore } from '@/stores/interface-store'
+import { hydrateInterfaceFromBatch } from '@/stores/interface-store'
 import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
 import { applyToAllRepresentations } from '@/components/viewer/MolstarViewer'
 import { INTERFACE_THEME_ID } from '@/components/viewer/themes/interface-theme'
@@ -63,19 +63,7 @@ export function AppShell() {
 
   useEffect(() => {
     if (!activeFile) return
-    const batch = useBatchInterfaceStore.getState().results[activeFile]
-    if (batch) {
-      useInterfaceStore.getState().setResults(
-        new Set(batch.paratope),
-        new Set(batch.epitope),
-        batch.nHBonds,
-        batch.nClashes,
-        batch.paratopeProps,
-        batch.epitopeProps,
-      )
-    } else {
-      useInterfaceStore.getState().clear()
-    }
+    hydrateInterfaceFromBatch(useBatchInterfaceStore.getState().results[activeFile])
   }, [activeFile])
 
   // Auto-restore last folder and last active file on startup.

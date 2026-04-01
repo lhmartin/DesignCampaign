@@ -39,6 +39,22 @@ interface InterfaceStore {
   clear:          () => void
 }
 
+// Hydrate the interface store from a batch result entry.
+// Pass null/undefined to clear (e.g. when switching to a file with no results).
+export function hydrateInterfaceFromBatch(
+  entry: { paratope: string[]; epitope: string[]; nHBonds: number; nClashes: number; paratopeProps: ResidueProps; epitopeProps: ResidueProps } | null | undefined
+): void {
+  if (entry) {
+    useInterfaceStore.getState().setResults(
+      new Set(entry.paratope), new Set(entry.epitope),
+      entry.nHBonds, entry.nClashes,
+      entry.paratopeProps, entry.epitopeProps,
+    )
+  } else {
+    useInterfaceStore.getState().clear()
+  }
+}
+
 export const useInterfaceStore = create<InterfaceStore>((set) => ({
   binderChains:   [],
   targetChains:   [],

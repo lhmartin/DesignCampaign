@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { useInterfaceStore } from '@/stores/interface-store'
+import { useInterfaceStore, hydrateInterfaceFromBatch } from '@/stores/interface-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useGroupStore } from '@/stores/group-store'
 import { useFileStore } from '@/stores/file-store'
@@ -342,16 +342,8 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
       useMetricsStore.getState().batchInjectResults(batchResults)
       useBatchInterfaceStore.getState().setBatchResults(interfaceData)
 
-      // Hydrate the single-file store for whichever file is currently open
       const activeFile = useFileStore.getState().activeFile
-      const active = activeFile ? interfaceData[activeFile] : null
-      if (active) {
-        useInterfaceStore.getState().setResults(
-          new Set(active.paratope), new Set(active.epitope),
-          active.nHBonds, active.nClashes,
-          active.paratopeProps, active.epitopeProps,
-        )
-      }
+      if (activeFile) hydrateInterfaceFromBatch(interfaceData[activeFile])
     } catch (err) {
       store.setError(err instanceof Error ? err.message : 'Batch failed')
     } finally {
