@@ -17,6 +17,8 @@ import { MarimoTab } from '@/components/notebook/MarimoTab'
 import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { useUIStore } from '@/stores/ui-store'
+import { useInterfaceStore } from '@/stores/interface-store'
+import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
 import { UpdateBanner } from './UpdateBanner'
 import { PythonSetupModal } from './PythonSetupModal'
 import { OnboardingTour } from './OnboardingTour'
@@ -56,6 +58,25 @@ export function AppShell() {
     document.documentElement.classList.toggle('dark', isDark)
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
   }, [isDark])
+
+  // When the active file changes, hydrate the interface store from batch results
+  // if they exist — so the Selection tab shows immediately without recalculating.
+  useEffect(() => {
+    if (!activeFile) return
+    const batch = useBatchInterfaceStore.getState().results[activeFile]
+    if (batch) {
+      useInterfaceStore.getState().setResults(
+        new Set(batch.paratope),
+        new Set(batch.epitope),
+        batch.nHBonds,
+        batch.nClashes,
+        batch.paratopeProps,
+        batch.epitopeProps,
+      )
+    } else {
+      useInterfaceStore.getState().clear()
+    }
+  }, [activeFile])
 
   // Auto-restore last folder and last active file on startup.
   // Both values are hydrated by zustand-persist before the first render.
