@@ -616,6 +616,18 @@ export function SelectionPanel() {
             }}>
               Interface Analysis
             </div>
+            {/* Interface-level summary: h-bonds + clashes belong to the whole interface */}
+            <div style={{ display: 'flex', gap: 8, padding: '6px 12px', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
+              <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--color-text-primary)', fontWeight: 600 }}>{nHBonds}</span>
+                {' '}H-bonds
+              </span>
+              <span style={{ color: 'var(--color-border)' }}>·</span>
+              <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', color: nClashes > 0 ? '#f59e0b' : 'var(--color-text-primary)', fontWeight: 600 }}>{nClashes}</span>
+                {' '}clash{nClashes !== 1 ? 'es' : ''}
+              </span>
+            </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -625,22 +637,20 @@ export function SelectionPanel() {
                 </tr>
               </thead>
               <tbody>
-                {[
+                {([
                   { label: 'Residues',        a: paratope.size,              b: epitope.size,               mono: true },
-                  { label: 'H-bonds',         a: nHBonds,                    b: null,                        mono: true },
-                  { label: 'Clashes',         a: nClashes,                   b: null,                        mono: true, warn: nClashes > 0 },
                   { label: 'Net charge',      a: paratopeProps.charge > 0 ? `+${paratopeProps.charge}` : paratopeProps.charge, b: epitopeProps.charge > 0 ? `+${epitopeProps.charge}` : epitopeProps.charge, mono: true },
                   { label: 'Hydrophobicity',  a: paratopeProps.hydrophobicity, b: epitopeProps.hydrophobicity, mono: true },
                   { label: 'Aromatic',        a: paratopeProps.aromatic,     b: epitopeProps.aromatic,       mono: true },
                   { label: 'Polar / NP',      a: `${paratopeProps.polar} / ${paratopeProps.nonpolar}`, b: `${epitopeProps.polar} / ${epitopeProps.nonpolar}`, mono: true },
-                ].map(row => (
+                ] as Array<{ label: string; a: string | number; b: string | number; mono?: boolean }>).map(row => (
                   <tr key={row.label} style={{ borderBottom: '1px solid var(--color-border)' }}>
                     <td style={{ padding: '3px 12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>{row.label}</td>
-                    <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: row.mono ? 'JetBrains Mono, monospace' : undefined, color: (row as any).warn ? '#f59e0b' : 'var(--color-text-primary)', fontWeight: 500 }}>
+                    <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: row.mono ? 'JetBrains Mono, monospace' : undefined, color: 'var(--color-text-primary)', fontWeight: 500 }}>
                       {row.a}
                     </td>
                     <td style={{ padding: '3px 12px 3px 8px', textAlign: 'right', fontFamily: row.mono ? 'JetBrains Mono, monospace' : undefined, color: 'var(--color-text-primary)', fontWeight: 500 }}>
-                      {row.b ?? '—'}
+                      {row.b}
                     </td>
                   </tr>
                 ))}
