@@ -19,6 +19,8 @@ import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useInterfaceStore } from '@/stores/interface-store'
 import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
+import { applyToAllRepresentations } from '@/components/viewer/MolstarViewer'
+import { INTERFACE_THEME_ID } from '@/components/viewer/themes/interface-theme'
 import { UpdateBanner } from './UpdateBanner'
 import { PythonSetupModal } from './PythonSetupModal'
 import { OnboardingTour } from './OnboardingTour'
@@ -295,7 +297,17 @@ export function AppShell() {
             }}>
               <MolstarViewer
                 ref={viewerRef}
-                onStructureLoaded={(path) => { console.log('Loaded:', path) }}
+                onStructureLoaded={(path) => {
+                  const batch = useBatchInterfaceStore.getState().results[path]
+                  if (batch) {
+                    const plugin = viewerRef.current?.getPlugin()
+                    if (plugin) {
+                      applyToAllRepresentations(plugin, (old: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+                        ...old, colorTheme: { name: INTERFACE_THEME_ID, params: {} },
+                      }))
+                    }
+                  }
+                }}
                 onError={(err) => { console.error('Viewer error:', err) }}
                 onNeedPythonSetup={() => setShowPythonSetup(true)}
               />
