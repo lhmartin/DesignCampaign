@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 
 interface Step {
   selector: string | null
@@ -108,15 +108,6 @@ export function OnboardingTour({ onDone }: { onDone: () => void }) {
     onDone()
   }, [onDone])
 
-  const advance = useCallback(() => {
-    if (step < STEPS.length - 1) setStep(s => s + 1)
-    else finish()
-  }, [step, finish])
-
-  const back = useCallback(() => {
-    if (step > 0) setStep(s => s - 1)
-  }, [step])
-
   // Measure target element whenever step changes
   useEffect(() => {
     if (!current.selector) { setRect(null); return }
@@ -126,18 +117,18 @@ export function OnboardingTour({ onDone }: { onDone: () => void }) {
     return () => window.removeEventListener('resize', measure)
   }, [step, current.selector])
 
-  // Keyboard navigation
+  // Keyboard navigation — uses functional setStep so no step dependency, never re-registers
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') finish()
-      else if (e.key === 'ArrowRight' || e.key === 'Enter') advance()
-      else if (e.key === 'ArrowLeft') back()
+      if (e.key === 'Escape') { localStorage.setItem('dc-onboarding-done', '1'); onDone() }
+      else if (e.key === 'ArrowRight' || e.key === 'Enter') setStep(s => s < STEPS.length - 1 ? s + 1 : (onDone(), s))
+      else if (e.key === 'ArrowLeft') setStep(s => Math.max(0, s - 1))
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [advance, back, finish])
+  }, [onDone]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cs = cardStyle(rect, current.placement)
+  const cs = useMemo(() => cardStyle(rect, current.placement), [rect, current.placement])
   const isFirst = step === 0
   const isLast = step === STEPS.length - 1
 
@@ -145,35 +136,24 @@ export function OnboardingTour({ onDone }: { onDone: () => void }) {
     <>
       {/* Full-screen click-blocker (clicking anywhere advances) */}
       <div
-        onClick={advance}
+        onClick={() => setStep(s => s < STEPS.length - 1 ? s + 1 : s)}
         style={{ position: 'fixed', inset: 0, zIndex: 9996, cursor: 'pointer' }}
       />
 
-      {/* Dim layer — covers screen; spotlight ring punches through via box-shadow */}
-      {!rect && (
-        <div style={{
-          position: 'fixed', inset: 0,
-          background: 'rgba(10, 15, 35, 0.75)',
-          zIndex: 9997,
-          pointerEvents: 'none',
-        }} />
-      )}
-
-      {/* Spotlight ring — box-shadow creates the dimming effect outside the target */}
-      {rect && (
-        <div style={{
-          position: 'fixed',
-          top: rect.top, left: rect.left,
-          width: rect.width, height: rect.height,
+      {/* Overlay — full-screen dim when no target; spotlight ring via box-shadow when target exists */}
+      <div style={{
+        position: 'fixed', zIndex: 9997, pointerEvents: 'none',
+        transition: 'top 0.22s cubic-bezier(.4,0,.2,1), left 0.22s cubic-bezier(.4,0,.2,1), width 0.22s cubic-bezier(.4,0,.2,1), height 0.22s cubic-bezier(.4,0,.2,1)',
+        ...(rect ? {
+          top: rect.top, left: rect.left, width: rect.width, height: rect.height,
           borderRadius: 8,
-          zIndex: 9997,
-          pointerEvents: 'none',
           boxShadow: '0 0 0 9999px rgba(10, 15, 35, 0.75)',
           outline: '1.5px solid rgba(0,200,168,0.55)',
-          outlineOffset: 0,
-          transition: 'top 0.22s cubic-bezier(.4,0,.2,1), left 0.22s cubic-bezier(.4,0,.2,1), width 0.22s cubic-bezier(.4,0,.2,1), height 0.22s cubic-bezier(.4,0,.2,1)',
-        }} />
-      )}
+        } : {
+          inset: 0,
+          background: 'rgba(10, 15, 35, 0.75)',
+        }),
+      }} />
 
       {/* Step card */}
       <div
@@ -230,7 +210,7 @@ export function OnboardingTour({ onDone }: { onDone: () => void }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {step > 0 && (
             <button
-              onClick={back}
+              onClick={() => setStep(s => s - 1)}
               style={{
                 padding: '5px 13px', borderRadius: 6, fontSize: 11,
                 border: '1px solid var(--color-border)',
@@ -241,11 +221,11 @@ export function OnboardingTour({ onDone }: { onDone: () => void }) {
             </button>
           )}
           <button
-            onClick={advance}
+            onClick={() => step < STEPS.length - 1 ? setStep(s => s + 1) : finish()}
             style={{
               padding: '5px 16px', borderRadius: 6, fontSize: 11, fontWeight: 600,
               border: 'none',
-              color: '#fff',
+              color: 'var(--color-primary-foreground)',
               background: 'var(--color-accent)',
               cursor: 'pointer',
               marginLeft: step > 0 ? 0 : 'auto',
