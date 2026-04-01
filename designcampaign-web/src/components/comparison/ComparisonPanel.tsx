@@ -116,18 +116,18 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
     <div className="flex flex-col h-full text-xs text-[var(--color-text-primary)]">
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--color-border)] shrink-0">
-        <span className="font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide text-[10px]">
+        <span className="font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide text-[11px]">
           Comparisons
         </span>
         {entries.length > 0 && (
           <>
-            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[var(--color-accent)]/15 text-[var(--color-accent)] font-mono text-[10px]">
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[var(--color-accent)]/15 text-[var(--color-accent)] font-mono text-[11px]">
               {entries.length}
             </span>
             <button
               onClick={clearComparisons}
               disabled={busy}
-              className="ml-auto px-2 py-1 rounded text-[10px] font-medium border border-[var(--color-border)] hover:bg-[var(--color-secondary-bg)] disabled:opacity-40"
+              className="ml-auto px-2 py-1 rounded text-[11px] font-medium border border-[var(--color-border)] hover:bg-[var(--color-secondary-bg)] disabled:opacity-40"
             >
               Clear all
             </button>
@@ -137,7 +137,7 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
 
       {/* Status / error */}
       {status && (
-        <div className="mx-3 mt-2 text-[10px] text-red-500 bg-red-50 dark:bg-red-950/30 rounded px-2 py-1 shrink-0">
+        <div className="mx-3 mt-2 text-[11px] text-red-500 bg-red-50 dark:bg-red-950/30 rounded px-2 py-1 shrink-0">
           {status}
         </div>
       )}
@@ -148,12 +148,12 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
           <span className="text-3xl">🔬</span>
           <div className="space-y-2">
             <p className="font-medium text-[var(--color-text-secondary)]">Overlay structures for comparison</p>
-            <p className="text-[10px]">
+            <p className="text-[11px]">
               <kbd className="px-1.5 py-0.5 rounded bg-[var(--color-secondary-bg)] border border-[var(--color-border)] font-mono">Ctrl</kbd>
               {' '}+{' '}
               <span className="font-medium">click</span> any file in the sidebar to overlay it on top of the current structure.
             </p>
-            <p className="text-[10px]">Then click <strong>Align</strong> to superimpose by Cα atoms and compute RMSD.</p>
+            <p className="text-[11px]">Then click <strong>Align</strong> to superimpose by Cα atoms and compute RMSD.</p>
           </div>
         </div>
       )}
@@ -173,15 +173,15 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
               />
 
               {/* Name */}
-              <span className="flex-1 truncate font-mono text-[10px]">{entry.name}</span>
+              <span className="flex-1 truncate font-mono text-[11px]">{entry.name}</span>
 
               {/* RMSD badge */}
               {entry.rmsd !== null ? (
-                <span className="shrink-0 text-[10px] font-mono bg-[var(--color-accent)]/15 text-[var(--color-accent)] px-1.5 py-0.5 rounded" title="RMSD (Cα)">
+                <span className="shrink-0 text-[11px] font-mono bg-[var(--color-accent)]/15 text-[var(--color-accent)] px-1.5 py-0.5 rounded" title="RMSD (Cα)">
                   {entry.rmsd.toFixed(2)} Å
                 </span>
               ) : (
-                <span className="shrink-0 text-[10px] text-[var(--color-text-disabled)]" title="Click Align to compute RMSD">—</span>
+                <span className="shrink-0 text-[11px] text-[var(--color-text-disabled)]" title="Click Align to compute RMSD">—</span>
               )}
 
               {/* Align */}
@@ -189,7 +189,7 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
                 onClick={() => alignEntry(entry.id)}
                 disabled={busy}
                 title="Superimpose Cα atoms onto main structure and compute RMSD"
-                className="shrink-0 px-1.5 py-0.5 rounded text-[10px] border border-[var(--color-border)] hover:bg-[var(--color-accent)]/10 hover:border-[var(--color-accent)]/40 hover:text-[var(--color-accent)] disabled:opacity-40 transition-colors"
+                className="shrink-0 px-1.5 py-0.5 rounded text-[11px] border border-[var(--color-border)] hover:bg-[var(--color-accent)]/10 hover:border-[var(--color-accent)]/40 hover:text-[var(--color-accent)] disabled:opacity-40 transition-colors"
               >
                 {busy ? '…' : 'Align'}
               </button>
@@ -199,7 +199,7 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
                 onClick={() => toggleVisible(entry.id)}
                 disabled={busy}
                 title={entry.visible ? 'Hide' : 'Show'}
-                className="shrink-0 text-[10px] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)] disabled:opacity-40 transition-colors"
+                className="shrink-0 text-[11px] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)] disabled:opacity-40 transition-colors"
               >
                 {entry.visible ? '👁' : '◌'}
               </button>
@@ -209,7 +209,7 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
                 onClick={() => removeComparison(entry.id)}
                 disabled={busy}
                 title="Remove overlay"
-                className="shrink-0 text-[10px] text-[var(--color-text-disabled)] hover:text-red-500 disabled:opacity-40 transition-colors"
+                className="shrink-0 text-[11px] text-[var(--color-text-disabled)] hover:text-red-500 disabled:opacity-40 transition-colors"
               >
                 ✕
               </button>
@@ -220,7 +220,7 @@ export function ComparisonPanel({ viewerRef }: ComparisonPanelProps) {
 
       {/* Legend */}
       {entries.length > 0 && (
-        <div className="text-[9px] text-[var(--color-text-disabled)] px-3 pb-3 pt-2 border-t border-[var(--color-border)] shrink-0">
+        <div className="text-[11px] text-[var(--color-text-disabled)] px-3 pb-3 pt-2 border-t border-[var(--color-border)] shrink-0">
           <strong>Align</strong> superimposes Cα atoms onto the first-loaded structure and reports RMSD.
           Each overlay is tinted at 60% opacity. <kbd className="px-0.5 rounded bg-[var(--color-secondary-bg)] border border-[var(--color-border)]">Ctrl</kbd>+click more files in the sidebar to add more overlays.
         </div>

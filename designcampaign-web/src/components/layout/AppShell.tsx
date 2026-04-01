@@ -109,7 +109,7 @@ export function AppShell() {
         {activeFile && (
           <span style={{
             fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 10,
+            fontSize: 11,
             color: 'var(--color-text-secondary)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -144,7 +144,7 @@ export function AppShell() {
             style={{
               padding: '2px 8px',
               borderRadius: 4,
-              fontSize: 10,
+              fontSize: 11,
               color: rightPanelMode === 'notebook' ? 'var(--color-accent)' : 'var(--color-text-secondary)',
               border: `1px solid ${rightPanelMode === 'notebook' ? 'var(--color-accent)' : 'var(--color-border)'}`,
               background: 'transparent',
@@ -162,7 +162,7 @@ export function AppShell() {
             style={{
               padding: '2px 8px',
               borderRadius: 4,
-              fontSize: 10,
+              fontSize: 11,
               color: 'var(--color-text-secondary)',
               border: '1px solid var(--color-border)',
               background: 'transparent',
@@ -216,7 +216,7 @@ export function AppShell() {
                 <TabsTrigger value="plot" data-tour="tab-plot"><ScatterChart size={12} strokeWidth={1.75} />Plot</TabsTrigger>
                 <TabsTrigger value="alignment"><GitMerge size={12} strokeWidth={1.75} />Align</TabsTrigger>
                 <TabsTrigger value="filter" data-tour="tab-filter"><SlidersHorizontal size={12} strokeWidth={1.75} />Filter</TabsTrigger>
-                <span style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px', flexShrink: 0 }} />
+                <span style={{ width: 2, height: 16, background: 'var(--color-border)', margin: '0 4px', flexShrink: 0, borderRadius: 1 }} />
                 <TabsTrigger value="selection"><MousePointer2 size={12} strokeWidth={1.75} />Selection</TabsTrigger>
                 <TabsTrigger value="uniprot"><Database size={12} strokeWidth={1.75} />UniProt</TabsTrigger>
                 <TabsTrigger value="chat"><MessageSquare size={12} strokeWidth={1.75} />Chat</TabsTrigger>

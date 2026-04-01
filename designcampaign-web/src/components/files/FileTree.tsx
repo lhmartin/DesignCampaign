@@ -86,7 +86,7 @@ function GroupSection({
         onClick={onToggle}
         className="w-full text-left px-2 py-1 text-xs font-medium text-[var(--color-text-secondary)] bg-[var(--color-secondary-bg)] hover:bg-[var(--color-border)] border-b border-[var(--color-border)] flex items-center gap-1.5 transition-colors"
       >
-        <span className="text-[10px] w-3 shrink-0">{group.isExpanded ? '▼' : '▶'}</span>
+        <span className="text-[11px] w-3 shrink-0">{group.isExpanded ? '▼' : '▶'}</span>
         <span className="truncate flex-1 font-mono">{group.label}</span>
         <span className="shrink-0 opacity-60">{group.members.length}</span>
       </button>

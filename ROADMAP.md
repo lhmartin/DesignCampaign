@@ -11,16 +11,16 @@ To re-enable: restore `TabsTrigger` (Grid2x2, value="corr") and `TabsContent` (f
 
 ---
 
-## UX / Readability Polish
+## ~~UX / Readability Polish~~ *(completed)*
 
-Small global changes identified during design audit — low effort, meaningful improvement:
+All four items implemented:
 
-| Item | Detail |
+| Item | Status |
 |------|--------|
-| **Minimum text size 11px** | Most of the UI runs at 10px (buttons, table cells, toolbar labels). 10px should be reserved for truly tertiary hints only; general UI text should floor at 11px. |
-| **Disabled text contrast** | `--color-text-disabled: #5a7399` (dark theme) is 3.6:1 — fails WCAG AA for small text (<14px). Raise to `#7090bb` to match `--color-text-secondary` intent. |
-| **Tab group separator** | The 1px divider between Filter and Selection tabs is too subtle. A 2px separator or slight background tint on the utility group (Selection / UniProt / Chat) would clarify the two sections of the tab bar. |
-| **Metric value weight** | Numeric values in the metrics table use `font-weight: 400`. Bumping to `500` in JetBrains Mono gives them more visual presence at 10–11px without changing layout. |
+| **Minimum text size 11px** | ✅ All `text-[10px]`/`text-[9px]` bumped to `text-[11px]` across FileBrowser, FileTree, MetricsTable, ComparisonPanel, SelectionPanel, AppShell |
+| **Disabled text contrast** | ✅ `--color-text-disabled` raised from `#5a7399` → `#7090bb` (passes WCAG AA) |
+| **Tab group separator** | ✅ Separator between Filter and Selection tabs widened to 2px, padded to 4px each side |
+| **Metric value weight** | ✅ Numeric values in metrics table now `font-weight: 500` |
 
 ---
 
