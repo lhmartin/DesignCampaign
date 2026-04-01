@@ -341,6 +341,17 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
       // or merges columns into existing rows matched by filePath then name.
       useMetricsStore.getState().batchInjectResults(batchResults)
       useBatchInterfaceStore.getState().setBatchResults(interfaceData)
+
+      // Hydrate the single-file store for whichever file is currently open
+      const activeFile = useFileStore.getState().activeFile
+      const active = activeFile ? interfaceData[activeFile] : null
+      if (active) {
+        useInterfaceStore.getState().setResults(
+          new Set(active.paratope), new Set(active.epitope),
+          active.nHBonds, active.nClashes,
+          active.paratopeProps, active.epitopeProps,
+        )
+      }
     } catch (err) {
       store.setError(err instanceof Error ? err.message : 'Batch failed')
     } finally {
