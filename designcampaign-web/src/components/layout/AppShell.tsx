@@ -18,6 +18,7 @@ import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { UpdateBanner } from './UpdateBanner'
 import { PythonSetupModal } from './PythonSetupModal'
+import { OnboardingTour } from './OnboardingTour'
 
 // Shared card style — applied to each panel's inner wrapper
 const cardStyle: React.CSSProperties = {
@@ -39,6 +40,7 @@ export function AppShell() {
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
   const [showPythonSetup, setShowPythonSetup] = useState(false)
   const [rightPanelMode, setRightPanelMode] = useState<'viewer' | 'notebook'>('viewer')
+  const [showTour, setShowTour] = useState(() => !localStorage.getItem('dc-onboarding-done'))
 
   // Persist panel layout across sessions via localStorage.
   // useDefaultLayout reads/writes to localStorage keyed by `id`.
@@ -120,6 +122,23 @@ export function AppShell() {
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
           <button
+            onClick={() => setShowTour(true)}
+            title="Show feature tour"
+            style={{
+              padding: '2px 7px',
+              borderRadius: 4,
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--color-text-disabled)',
+              border: '1px solid var(--color-border)',
+              background: 'transparent',
+              cursor: 'pointer',
+              lineHeight: 1,
+            }}
+          >
+            ?
+          </button>
+          <button
             onClick={() => setRightPanelMode(m => m === 'viewer' ? 'notebook' : 'viewer')}
             title={rightPanelMode === 'viewer' ? 'Open Marimo notebook' : 'Back to structure viewer'}
             style={{
@@ -192,11 +211,11 @@ export function AppShell() {
               style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
             >
               <TabsList>
-                <TabsTrigger value="files"><FolderOpen size={12} strokeWidth={1.75} />Files</TabsTrigger>
-                <TabsTrigger value="metrics"><Table2 size={12} strokeWidth={1.75} />Metrics</TabsTrigger>
-                <TabsTrigger value="plot"><ScatterChart size={12} strokeWidth={1.75} />Plot</TabsTrigger>
+                <TabsTrigger value="files" data-tour="tab-files"><FolderOpen size={12} strokeWidth={1.75} />Files</TabsTrigger>
+                <TabsTrigger value="metrics" data-tour="tab-metrics"><Table2 size={12} strokeWidth={1.75} />Metrics</TabsTrigger>
+                <TabsTrigger value="plot" data-tour="tab-plot"><ScatterChart size={12} strokeWidth={1.75} />Plot</TabsTrigger>
                 <TabsTrigger value="alignment"><GitMerge size={12} strokeWidth={1.75} />Align</TabsTrigger>
-                <TabsTrigger value="filter"><SlidersHorizontal size={12} strokeWidth={1.75} />Filter</TabsTrigger>
+                <TabsTrigger value="filter" data-tour="tab-filter"><SlidersHorizontal size={12} strokeWidth={1.75} />Filter</TabsTrigger>
                 <span style={{ width: 1, height: 14, background: 'var(--color-border)', margin: '0 2px', flexShrink: 0 }} />
                 <TabsTrigger value="selection"><MousePointer2 size={12} strokeWidth={1.75} />Selection</TabsTrigger>
                 <TabsTrigger value="uniprot"><Database size={12} strokeWidth={1.75} />UniProt</TabsTrigger>
@@ -242,7 +261,7 @@ export function AppShell() {
 
         {/* ── Right card: structure viewer / notebook ── */}
         <ResizablePanel id="right-panel" defaultSize="62%" minSize="30%">
-          <div style={{ ...cardStyle, position: 'relative' }}>
+          <div data-tour="right-panel" style={{ ...cardStyle, position: 'relative' }}>
 
             {/* Mol* viewer — hidden but kept mounted when in notebook mode */}
             <div style={{
@@ -278,6 +297,8 @@ export function AppShell() {
           onDismiss={() => setShowPythonSetup(false)}
         />
       )}
+
+      {showTour && <OnboardingTour onDone={() => setShowTour(false)} />}
     </div>
   )
 }

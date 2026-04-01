@@ -113,6 +113,12 @@ html, body, #root {
 ::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-text-disabled); }
 
+/* Onboarding tour card entrance */
+@keyframes tourCardIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* Custom select arrow */
 select {
   appearance: none;
