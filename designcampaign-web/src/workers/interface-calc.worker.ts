@@ -5,6 +5,7 @@
  */
 import { parseAtoms } from '@/lib/parsers/parse-atoms'
 import { computeContacts } from '@/lib/interface-calc'
+import type { ResidueProps } from '@/lib/residue-props'
 import type { AtomScope } from '@/stores/interface-store'
 
 export interface WorkerBatchInput {
@@ -21,6 +22,10 @@ export interface WorkerFileResult {
   nParatope: number
   nEpitope: number
   nContacts: number
+  nHBonds: number
+  nClashes: number
+  paratopeProps: ResidueProps
+  epitopeProps: ResidueProps
   paratope: string[]
   epitope: string[]
 }
@@ -34,13 +39,17 @@ onmessage = (e: MessageEvent<WorkerBatchInput>) => {
     try {
       const binderAtoms = parseAtoms(file.text, binderChains, atomScope)
       const targetAtoms = parseAtoms(file.text, targetChains, atomScope)
-      const { paratope, epitope, nContacts } = computeContacts(binderAtoms, targetAtoms, cutoff)
+      const { paratope, epitope, nContacts, nHBonds, nClashes, paratopeProps, epitopeProps } = computeContacts(binderAtoms, targetAtoms, cutoff)
       results.push({
         filePath: file.path,
         name: file.name,
         nParatope: paratope.size,
         nEpitope: epitope.size,
         nContacts,
+        nHBonds,
+        nClashes,
+        paratopeProps,
+        epitopeProps,
         paratope: Array.from(paratope),
         epitope: Array.from(epitope),
       })

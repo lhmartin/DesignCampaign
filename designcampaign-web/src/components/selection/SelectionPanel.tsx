@@ -516,8 +516,12 @@ function NamedSelectionRow({ sel }: { sel: import('@/stores/named-selection-stor
 
 export function SelectionPanel() {
   const { selectedResidues, clearSelection } = useSelectionStore()
-  const paratope   = useInterfaceStore(s => s.paratope)
-  const epitope    = useInterfaceStore(s => s.epitope)
+  const paratope       = useInterfaceStore(s => s.paratope)
+  const epitope        = useInterfaceStore(s => s.epitope)
+  const nHBonds        = useInterfaceStore(s => s.nHBonds)
+  const nClashes       = useInterfaceStore(s => s.nClashes)
+  const paratopeProps  = useInterfaceStore(s => s.paratopeProps)
+  const epitopeProps   = useInterfaceStore(s => s.epitopeProps)
   const { activeFile } = useFileStore()
   const selections = useNamedSelectionStore(s => s.selections)
 
@@ -596,6 +600,52 @@ export function SelectionPanel() {
               </span>
             </div>
             {selections.map(sel => <NamedSelectionRow key={sel.id} sel={sel} />)}
+          </div>
+        )}
+
+        {/* ── Interface analysis summary ── */}
+        {hasInterface && (
+          <div style={{ borderBottom: '1px solid var(--color-border)' }}>
+            <div style={{
+              padding: '5px 12px',
+              fontSize: 11, fontWeight: 600,
+              color: 'var(--color-text-secondary)',
+              textTransform: 'uppercase', letterSpacing: '0.04em',
+              borderBottom: '1px solid var(--color-border)',
+              background: 'var(--color-secondary-bg)',
+            }}>
+              Interface Analysis
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  <th style={{ padding: '4px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-disabled)', fontSize: 10 }}></th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 600, color: PARATOPE_COLOR, fontSize: 10 }}>Paratope</th>
+                  <th style={{ padding: '4px 12px 4px 8px', textAlign: 'right', fontWeight: 600, color: EPITOPE_COLOR, fontSize: 10 }}>Epitope</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { label: 'Residues',        a: paratope.size,              b: epitope.size,               mono: true },
+                  { label: 'H-bonds',         a: nHBonds,                    b: null,                        mono: true },
+                  { label: 'Clashes',         a: nClashes,                   b: null,                        mono: true, warn: nClashes > 0 },
+                  { label: 'Net charge',      a: paratopeProps.charge > 0 ? `+${paratopeProps.charge}` : paratopeProps.charge, b: epitopeProps.charge > 0 ? `+${epitopeProps.charge}` : epitopeProps.charge, mono: true },
+                  { label: 'Hydrophobicity',  a: paratopeProps.hydrophobicity, b: epitopeProps.hydrophobicity, mono: true },
+                  { label: 'Aromatic',        a: paratopeProps.aromatic,     b: epitopeProps.aromatic,       mono: true },
+                  { label: 'Polar / NP',      a: `${paratopeProps.polar} / ${paratopeProps.nonpolar}`, b: `${epitopeProps.polar} / ${epitopeProps.nonpolar}`, mono: true },
+                ].map(row => (
+                  <tr key={row.label} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                    <td style={{ padding: '3px 12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>{row.label}</td>
+                    <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: row.mono ? 'JetBrains Mono, monospace' : undefined, color: (row as any).warn ? '#f59e0b' : 'var(--color-text-primary)', fontWeight: 500 }}>
+                      {row.a}
+                    </td>
+                    <td style={{ padding: '3px 12px 3px 8px', textAlign: 'right', fontFamily: row.mono ? 'JetBrains Mono, monospace' : undefined, color: 'var(--color-text-primary)', fontWeight: 500 }}>
+                      {row.b ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 

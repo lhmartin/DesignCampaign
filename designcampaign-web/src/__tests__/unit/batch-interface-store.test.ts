@@ -39,7 +39,7 @@ describe('useBatchInterfaceStore', () => {
 
   it('setBatchResults stores the provided data', () => {
     useBatchInterfaceStore.getState().setBatchResults({
-      '/path/a.pdb': { paratope: ['A:10', 'A:11'], epitope: ['B:50'] },
+      '/path/a.pdb': { paratope: ['A:10', 'A:11'], epitope: ['B:50'], nHBonds: 0, nClashes: 0, paratopeProps: { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 }, epitopeProps: { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 } },
     })
     const results = useBatchInterfaceStore.getState().results
     expect(results['/path/a.pdb'].paratope).toContain('A:10')
@@ -47,15 +47,16 @@ describe('useBatchInterfaceStore', () => {
   })
 
   it('setBatchResults replaces previous data entirely', () => {
-    useBatchInterfaceStore.getState().setBatchResults({ '/old.pdb': { paratope: [], epitope: [] } })
-    useBatchInterfaceStore.getState().setBatchResults({ '/new.pdb': { paratope: ['A:1'], epitope: [] } })
+    const zero = { nHBonds: 0, nClashes: 0, paratopeProps: { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 }, epitopeProps: { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 } }
+    useBatchInterfaceStore.getState().setBatchResults({ '/old.pdb': { paratope: [], epitope: [], ...zero } })
+    useBatchInterfaceStore.getState().setBatchResults({ '/new.pdb': { paratope: ['A:1'], epitope: [], ...zero } })
     const results = useBatchInterfaceStore.getState().results
     expect(results['/old.pdb']).toBeUndefined()
     expect(results['/new.pdb']).toBeDefined()
   })
 
   it('clear() empties all results', () => {
-    useBatchInterfaceStore.getState().setBatchResults({ '/a.pdb': { paratope: ['A:1'], epitope: [] } })
+    useBatchInterfaceStore.getState().setBatchResults({ '/a.pdb': { paratope: ['A:1'], epitope: [], nHBonds: 0, nClashes: 0, paratopeProps: { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 }, epitopeProps: { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 } } })
     useBatchInterfaceStore.getState().clear()
     expect(Object.keys(useBatchInterfaceStore.getState().results)).toHaveLength(0)
   })

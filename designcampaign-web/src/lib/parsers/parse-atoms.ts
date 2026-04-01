@@ -1,6 +1,7 @@
 export interface AtomRecord {
   chain:    string
   resId:    number
+  resName:  string   // 3-letter amino acid code, e.g. "ALA", "GLY"
   atomName: string
   x: number
   y: number
@@ -26,7 +27,7 @@ export function parseAtoms(
     const rec = line.slice(0, 6).trim()
     if (rec !== 'ATOM' && rec !== 'HETATM') continue
 
-    // PDB column layout (1-based): chain=22, resSeq=23-26, atomName=13-16, x=31-38, y=39-46, z=47-54
+    // PDB column layout (1-based): chain=22, resSeq=23-26, resName=18-20, atomName=13-16, x=31-38, y=39-46, z=47-54
     const chain    = line[21] ?? ' '
     if (!chainSet.has(chain)) continue
 
@@ -39,14 +40,15 @@ export function parseAtoms(
     // Backbone filter
     if (scope === 'backbone' && !BACKBONE_ATOMS.has(atomName)) continue
 
-    const resId = parseInt(line.slice(22, 26).trim(), 10)
-    const x     = parseFloat(line.slice(30, 38))
-    const y     = parseFloat(line.slice(38, 46))
-    const z     = parseFloat(line.slice(46, 54))
+    const resName = line.slice(17, 20).trim()
+    const resId   = parseInt(line.slice(22, 26).trim(), 10)
+    const x       = parseFloat(line.slice(30, 38))
+    const y       = parseFloat(line.slice(38, 46))
+    const z       = parseFloat(line.slice(46, 54))
 
     if (isNaN(resId) || isNaN(x) || isNaN(y) || isNaN(z)) continue
 
-    records.push({ chain, resId, atomName, x, y, z })
+    records.push({ chain, resId, resName, atomName, x, y, z })
   }
 
   return records

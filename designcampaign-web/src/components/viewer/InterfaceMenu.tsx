@@ -185,6 +185,8 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
   const atomScope     = useInterfaceStore(s => s.atomScope)
   const paratope      = useInterfaceStore(s => s.paratope)
   const epitope       = useInterfaceStore(s => s.epitope)
+  const nHBonds       = useInterfaceStore(s => s.nHBonds)
+  const nClashes      = useInterfaceStore(s => s.nClashes)
   const isCalculating = useInterfaceStore(s => s.isCalculating)
   const lastError     = useInterfaceStore(s => s.lastError)
 
@@ -232,8 +234,8 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
         store.setError('No atoms found for the specified chains.')
         return
       }
-      const { paratope, epitope } = computeContacts(binderAtoms, targetAtoms, store.cutoff)
-      store.setResults(paratope, epitope)
+      const { paratope, epitope, nHBonds, nClashes, paratopeProps, epitopeProps } = computeContacts(binderAtoms, targetAtoms, store.cutoff)
+      store.setResults(paratope, epitope, nHBonds, nClashes, paratopeProps, epitopeProps)
       // Apply interface colour theme using the shared helper from MolstarViewer
       await applyToAllRepresentations(plugin, (old: any) => ({  // eslint-disable-line @typescript-eslint/no-explicit-any
         ...old,
@@ -263,7 +265,7 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
     store.setCalculating(true)
 
     const batchResults: Array<{ filePath: string; name: string; metrics: Record<string, number> }> = []
-    const interfaceData: Record<string, { paratope: string[]; epitope: string[] }> = {}
+    const interfaceData: Record<string, { paratope: string[]; epitope: string[]; nHBonds: number; nClashes: number; paratopeProps: import('@/lib/residue-props').ResidueProps; epitopeProps: import('@/lib/residue-props').ResidueProps }> = {}
 
     try {
       for (let i = 0; i < files.length; i += BATCH_SIZE) {
@@ -303,9 +305,29 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
           batchResults.push({
             filePath: r.filePath,
             name:     r.name,
-            metrics:  { n_paratope: r.nParatope, n_epitope: r.nEpitope, n_contacts: r.nContacts },
+            metrics:  {
+              n_paratope:              r.nParatope,
+              n_epitope:               r.nEpitope,
+              n_contacts:              r.nContacts,
+              n_hbonds:                r.nHBonds,
+              n_clashes:               r.nClashes,
+              paratope_charge:         r.paratopeProps.charge,
+              paratope_hydrophobicity: r.paratopeProps.hydrophobicity,
+              paratope_aromatic:       r.paratopeProps.aromatic,
+              paratope_polar:          r.paratopeProps.polar,
+              paratope_nonpolar:       r.paratopeProps.nonpolar,
+              epitope_charge:          r.epitopeProps.charge,
+              epitope_hydrophobicity:  r.epitopeProps.hydrophobicity,
+              epitope_aromatic:        r.epitopeProps.aromatic,
+              epitope_polar:           r.epitopeProps.polar,
+              epitope_nonpolar:        r.epitopeProps.nonpolar,
+            },
           })
-          interfaceData[r.filePath] = { paratope: r.paratope, epitope: r.epitope }
+          interfaceData[r.filePath] = {
+            paratope: r.paratope, epitope: r.epitope,
+            nHBonds: r.nHBonds, nClashes: r.nClashes,
+            paratopeProps: r.paratopeProps, epitopeProps: r.epitopeProps,
+          }
         }
 
         setBatchProgress({ done: Math.min(i + BATCH_SIZE, files.length), total: files.length })
@@ -432,12 +454,18 @@ export function InterfaceMenu({ plugin }: { plugin: PluginUIContext }) {
 
           {/* Results summary */}
           {hasResults && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, background: 'rgba(56,189,248,0.12)', color: PARATOPE_COLOR, border: `1px solid ${PARATOPE_COLOR}40` }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(56,189,248,0.12)', color: PARATOPE_COLOR, border: `1px solid ${PARATOPE_COLOR}40` }}>
                 Paratope: {paratope.size} res
               </span>
-              <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, background: 'rgba(248,113,113,0.12)', color: EPITOPE_COLOR, border: `1px solid ${EPITOPE_COLOR}40` }}>
+              <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'rgba(248,113,113,0.12)', color: EPITOPE_COLOR, border: `1px solid ${EPITOPE_COLOR}40` }}>
                 Epitope: {epitope.size} res
+              </span>
+              <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: 'var(--color-secondary-bg)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                H-bonds: {nHBonds}
+              </span>
+              <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: nClashes > 0 ? 'rgba(251,191,36,0.12)' : 'var(--color-secondary-bg)', color: nClashes > 0 ? '#f59e0b' : 'var(--color-text-disabled)', border: `1px solid ${nClashes > 0 ? '#f59e0b40' : 'var(--color-border)'}` }}>
+                Clashes: {nClashes}
               </span>
             </div>
           )}

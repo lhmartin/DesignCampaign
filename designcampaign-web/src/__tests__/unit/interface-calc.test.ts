@@ -4,8 +4,8 @@ import type { AtomRecord } from '@/lib/parsers/parse-atoms'
 
 // ─── Atom builder ────────────────────────────────────────────────────────────
 
-function atom(chain: string, resId: number, x: number, y: number, z: number): AtomRecord {
-  return { chain, resId, atomName: 'CA', x, y, z }
+function atom(chain: string, resId: number, x: number, y: number, z: number, resName = 'ALA'): AtomRecord {
+  return { chain, resId, resName, atomName: 'CA', x, y, z }
 }
 
 describe('computeContacts', () => {
