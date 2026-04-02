@@ -158,6 +158,9 @@ describe('passesFilters — residue rules', () => {
         [filePath]: {
           paratope: ['A:42', 'A:67', 'A:10'],
           epitope:  ['B:100', 'B:105'],
+          nHBonds: 0, nClashes: 0,
+          paratopeProps: { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 },
+          epitopeProps:  { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 },
         },
       },
     })

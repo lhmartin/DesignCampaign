@@ -62,7 +62,7 @@ describe('FilterPanel', () => {
 
   it('residue rule ⚠ is absent when batch data is present', async () => {
     useBatchInterfaceStore.setState({
-      results: { '/some.pdb': { paratope: ['A:42'], epitope: [] } },
+      results: { '/some.pdb': { paratope: ['A:42'], epitope: [], nHBonds: 0, nClashes: 0, paratopeProps: { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 }, epitopeProps: { charge: 0, hydrophobicity: 0, aromatic: 0, polar: 0, nonpolar: 0 } } },
     })
     const user = userEvent.setup()
     render(<FilterPanel />)

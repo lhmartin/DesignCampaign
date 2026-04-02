@@ -1,11 +1,21 @@
 import { create } from 'zustand'
+import type { ResidueProps } from '@/lib/residue-props'
 
 export type ResidueKey = string   // "A:45" format
 
+interface BatchInterfaceResult {
+  paratope:      ResidueKey[]
+  epitope:       ResidueKey[]
+  nHBonds:       number
+  nClashes:      number
+  paratopeProps: ResidueProps
+  epitopeProps:  ResidueProps
+}
+
 interface BatchInterfaceStore {
-  // filePath → { paratope: ResidueKey[], epitope: ResidueKey[] }
-  results: Record<string, { paratope: ResidueKey[]; epitope: ResidueKey[] }>
-  setBatchResults: (data: Record<string, { paratope: ResidueKey[]; epitope: ResidueKey[] }>) => void
+  // filePath → interface results
+  results: Record<string, BatchInterfaceResult>
+  setBatchResults: (data: Record<string, BatchInterfaceResult>) => void
   clear: () => void
 }
 

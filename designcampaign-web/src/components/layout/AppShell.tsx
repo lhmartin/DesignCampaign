@@ -16,6 +16,11 @@ import { ChatPanel } from '@/components/chat/ChatPanel'
 import { MarimoTab } from '@/components/notebook/MarimoTab'
 import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
+import { useUIStore } from '@/stores/ui-store'
+import { hydrateInterfaceFromBatch } from '@/stores/interface-store'
+import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
+import { applyToAllRepresentations } from '@/components/viewer/MolstarViewer'
+import { INTERFACE_THEME_ID } from '@/components/viewer/themes/interface-theme'
 import { UpdateBanner } from './UpdateBanner'
 import { PythonSetupModal } from './PythonSetupModal'
 import { OnboardingTour } from './OnboardingTour'
@@ -37,6 +42,7 @@ const cardStyle: React.CSSProperties = {
 export function AppShell() {
   const viewerRef = useRef<MolstarViewerHandle>(null)
   const { activeFile, currentFolder, setFolder } = useFileStore()
+  const { activeTab, setActiveTab } = useUIStore()
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
   const [showPythonSetup, setShowPythonSetup] = useState(false)
   const [rightPanelMode, setRightPanelMode] = useState<'viewer' | 'notebook'>('viewer')
@@ -54,6 +60,11 @@ export function AppShell() {
     document.documentElement.classList.toggle('dark', isDark)
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
   }, [isDark])
+
+  useEffect(() => {
+    if (!activeFile) return
+    hydrateInterfaceFromBatch(useBatchInterfaceStore.getState().results[activeFile])
+  }, [activeFile])
 
   // Auto-restore last folder and last active file on startup.
   // Both values are hydrated by zustand-persist before the first render.
@@ -207,7 +218,8 @@ export function AppShell() {
               Tabs root is flex-col so TabsContent children can expand with flex-1.
             */}
             <Tabs
-              defaultValue="files"
+              value={activeTab}
+              onValueChange={setActiveTab}
               style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
             >
               <TabsList>
@@ -271,7 +283,17 @@ export function AppShell() {
             }}>
               <MolstarViewer
                 ref={viewerRef}
-                onStructureLoaded={(path) => { console.log('Loaded:', path) }}
+                onStructureLoaded={(path) => {
+                  const batch = useBatchInterfaceStore.getState().results[path]
+                  if (batch) {
+                    const plugin = viewerRef.current?.getPlugin()
+                    if (plugin) {
+                      applyToAllRepresentations(plugin, (old: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+                        ...old, colorTheme: { name: INTERFACE_THEME_ID, params: {} },
+                      }))
+                    }
+                  }
+                }}
                 onError={(err) => { console.error('Viewer error:', err) }}
                 onNeedPythonSetup={() => setShowPythonSetup(true)}
               />
