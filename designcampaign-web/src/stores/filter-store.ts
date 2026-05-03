@@ -1,6 +1,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { useBatchInterfaceStore } from './batch-interface-store'
+import { useSequenceStore } from '@/stores/sequence-store'
+import { useInterfaceStore } from '@/stores/interface-store'
+import { useAntpackStore } from '@/stores/antpack-store'
+import { LIABILITY_PRESETS, getCachedRegex, customPatternToRegex } from '@/lib/sequence-liabilities'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,7 +26,39 @@ export interface ResidueFilterRule {
   mode: 'any' | 'all'
 }
 
-export type FilterRule = NumericFilterRule | ResidueFilterRule
+export interface LiabilityFilterRule {
+  id: string
+  type: 'liability'
+  presets: string[]
+  customPatterns: string[]
+  chainMode: 'binder' | 'all'
+  cdrOnly: boolean
+  exposedOnly: boolean
+}
+
+export type FilterRule = NumericFilterRule | ResidueFilterRule | LiabilityFilterRule
+
+// ─── Per-rule pattern cache ───────────────────────────────────────────────────
+// Keyed on the rule object itself. Zustand replaces the rule object on any
+// update, so stale entries are GC'd automatically — no manual invalidation needed.
+const _rulePatternCache = new WeakMap<LiabilityFilterRule, RegExp[]>()
+
+function getPatternsForRule(rule: LiabilityFilterRule): RegExp[] {
+  let cached = _rulePatternCache.get(rule)
+  if (!cached) {
+    cached = [
+      ...rule.presets
+        .map(id => LIABILITY_PRESETS.find(p => p.id === id)?.pattern)
+        .filter((p): p is string => !!p)
+        .map(p => getCachedRegex(p)),
+      ...rule.customPatterns
+        .map(customPatternToRegex)
+        .filter((re): re is RegExp => re !== null),
+    ]
+    _rulePatternCache.set(rule, cached)
+  }
+  return cached
+}
 
 export type RankingMode = 'borda' | 'weighted-sum'
 
@@ -68,7 +104,8 @@ interface FilterStore {
   rules: FilterRule[]
   addRule: () => void
   addResidueRule: () => void
-  updateRule: (id: string, patch: Partial<NumericFilterRule> | Partial<ResidueFilterRule>) => void
+  addLiabilityRule: () => void
+  updateRule: (id: string, patch: Partial<NumericFilterRule> | Partial<ResidueFilterRule> | Partial<LiabilityFilterRule>) => void
   removeRule: (id: string) => void
   clearRules: () => void
 
@@ -128,6 +165,18 @@ export const useFilterStore = create<FilterStore>()(
           target: 'paratope' as const,
           residues: '',
           mode: 'any' as const,
+        }],
+      })),
+
+      addLiabilityRule: () => set(s => ({
+        rules: [...s.rules, {
+          id: crypto.randomUUID(),
+          type: 'liability' as const,
+          presets: [],
+          customPatterns: [],
+          chainMode: 'binder',
+          cdrOnly: false,
+          exposedOnly: false,
         }],
       })),
 
@@ -233,6 +282,69 @@ export const useFilterStore = create<FilterStore>()(
             return residueRule.mode === 'any'
               ? specs.some(spec => keys.some(key => residueKeyMatches(spec, key)))
               : specs.every(spec => keys.some(key => residueKeyMatches(spec, key)))
+          }
+
+          if (ruleType === 'liability') {
+            const rule = r as LiabilityFilterRule
+            if (rule.presets.length === 0 && rule.customPatterns.length === 0) return true
+            if (!filePath) return true
+
+            const allSeqs = useSequenceStore.getState().sequences.get(filePath)
+            if (!allSeqs?.length) return true
+
+            let seqs: typeof allSeqs
+            if (rule.chainMode === 'binder') {
+              const { binderChains } = useInterfaceStore.getState()
+              seqs = binderChains.length > 0
+                ? allSeqs.filter(s => binderChains.includes(s.chain))
+                : allSeqs
+            } else if (rule.chainMode === 'all') {
+              seqs = allSeqs
+            } else {
+              seqs = allSeqs.filter(s => s.chain === rule.chainMode)
+            }
+            if (seqs.length === 0) return true
+
+            const patterns = getPatternsForRule(rule)
+            if (patterns.length === 0) return true
+
+            const cdrAnnotations = rule.cdrOnly
+              ? useAntpackStore.getState().annotations.get(filePath) ?? null
+              : null
+
+            for (const chainSeq of seqs) {
+              const seq           = chainSeq.seq
+              const cdrAssigns    = cdrAnnotations?.find(a => a.chain === chainSeq.chain)?.assignments ?? null
+              const exposedMask   = rule.exposedOnly ? (chainSeq.exposedMask ?? null) : null
+
+              for (const regex of patterns) {
+                regex.lastIndex = 0
+                let match: RegExpExecArray | null
+                while ((match = regex.exec(seq)) !== null) {
+                  const start = match.index
+                  const len   = match[0].length
+
+                  if (cdrAssigns) {
+                    let inCDR = false
+                    for (let i = 0; i < len; i++) {
+                      if ((cdrAssigns[start + i] as string | null | undefined)?.startsWith('CDR')) { inCDR = true; break }
+                    }
+                    if (!inCDR) continue
+                  }
+
+                  if (exposedMask) {
+                    let exposed = false
+                    for (let i = 0; i < len; i++) {
+                      if (exposedMask[start + i] ?? false) { exposed = true; break }
+                    }
+                    if (!exposed) continue
+                  }
+
+                  return false
+                }
+              }
+            }
+            return true
           }
 
           // Numeric rule (or legacy rule without type)

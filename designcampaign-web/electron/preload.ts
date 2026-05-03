@@ -117,4 +117,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('marimo:install-progress', listener)
     return () => ipcRenderer.off('marimo:install-progress', listener)
   },
+
+  // Open URL in system browser
+  openExternal: (url: string): void => { ipcRenderer.send('open-external', url) },
+
+  // Cloud storage
+  cloudListConnections: (): Promise<import('./cloud-handlers').CloudConnectionMeta[]> =>
+    ipcRenderer.invoke('cloud:list-connections'),
+
+  cloudAddConnection: (input: import('./cloud-handlers').AddConnectionInput): Promise<{ ok: boolean; id?: string; error?: string }> =>
+    ipcRenderer.invoke('cloud:add-connection', input),
+
+  cloudDeleteConnection: (id: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('cloud:delete-connection', { id }),
+
+  cloudTestConnection: (input: import('./cloud-handlers').TestConnectionInput): Promise<{ ok: boolean; error?: string; fileCount?: number }> =>
+    ipcRenderer.invoke('cloud:test-connection', input),
+
+  cloudListFiles: (id: string): Promise<Array<{ name: string; path: string; size: number; mtime: number }>> =>
+    ipcRenderer.invoke('cloud:list-files', { id }),
+
+  cloudReadFile: (path: string): Promise<string> =>
+    ipcRenderer.invoke('cloud:read-file', { path }),
 })

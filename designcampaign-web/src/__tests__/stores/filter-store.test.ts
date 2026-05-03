@@ -1,13 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useFilterStore, type NumericFilterRule, type ResidueFilterRule } from '@/stores/filter-store'
+import { useFilterStore, type NumericFilterRule, type ResidueFilterRule, type LiabilityFilterRule } from '@/stores/filter-store'
 import { useMetricsStore } from '@/stores/metrics-store'
 import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
+import { useSequenceStore } from '@/stores/sequence-store'
+import { useInterfaceStore } from '@/stores/interface-store'
 
 beforeEach(() => {
   useFilterStore.getState().clearRules()
   useFilterStore.setState({ rankingMetrics: [], presets: [] })
   useMetricsStore.getState().clearAll()
   useBatchInterfaceStore.getState().clear()
+  useSequenceStore.getState().clearAll()
+  useInterfaceStore.setState({ binderChains: [], targetChains: [] })
   window.localStorage.clear()
 })
 
@@ -316,5 +320,135 @@ describe('presets', () => {
     useFilterStore.getState().importPresetJSON(json)
     expect(useFilterStore.getState().presets).toHaveLength(1)
     expect(useFilterStore.getState().presets[0].name).toBe('original')
+  })
+})
+
+// ─── passesFilters — liability rules ─────────────────────────────────────────
+
+describe('passesFilters — liability rules', () => {
+  const filePath = '/test.pdb'
+
+  function addLiabilityRule(patch: Partial<LiabilityFilterRule> = {}) {
+    useFilterStore.getState().addLiabilityRule()
+    const id = useFilterStore.getState().rules[0].id
+    if (Object.keys(patch).length > 0) useFilterStore.getState().updateRule(id, patch)
+    return id
+  }
+
+  function seedSequence(chain: string, seq: string, exposedMask?: boolean[]) {
+    useSequenceStore.getState().mergeSequences(
+      new Map([[filePath, [{ chain, seq, ...(exposedMask ? { exposedMask } : {}) }]]])
+    )
+  }
+
+  it('addLiabilityRule creates a rule with type="liability"', () => {
+    useFilterStore.getState().addLiabilityRule()
+    const rule = useFilterStore.getState().rules[0] as LiabilityFilterRule
+    expect(rule.type).toBe('liability')
+    expect(rule.presets).toEqual([])
+    expect(rule.customPatterns).toEqual([])
+    expect(rule.chainMode).toBe('binder')
+    expect(rule.cdrOnly).toBe(false)
+    expect(rule.exposedOnly).toBe(false)
+  })
+
+  it('passes when no presets or custom patterns are selected', () => {
+    addLiabilityRule()
+    seedSequence('A', 'QVQLNG')
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(true)
+  })
+
+  it('passes when no filePath is provided', () => {
+    addLiabilityRule({ presets: ['NG'] })
+    expect(useFilterStore.getState().passesFilters({})).toBe(true)
+  })
+
+  it('passes when no sequence data exists for the file', () => {
+    addLiabilityRule({ presets: ['NG'], chainMode: 'all' })
+    // No sequences seeded — should pass gracefully
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(true)
+  })
+
+  it('fails when preset pattern found in sequence (chainMode=all)', () => {
+    addLiabilityRule({ presets: ['NG'], chainMode: 'all' })
+    seedSequence('A', 'QVQLNGVQ')  // contains NG
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(false)
+  })
+
+  it('passes when preset pattern not found in sequence', () => {
+    addLiabilityRule({ presets: ['NG'], chainMode: 'all' })
+    seedSequence('A', 'QVQLQVQL')  // no NG
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(true)
+  })
+
+  it('fails with custom pattern when match found', () => {
+    addLiabilityRule({ customPatterns: ['AxC'], chainMode: 'all' })
+    seedSequence('A', 'QVATCQVQ')  // ATC matches AxC
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(false)
+  })
+
+  it('passes with custom pattern when no match', () => {
+    addLiabilityRule({ customPatterns: ['AxC'], chainMode: 'all' })
+    seedSequence('A', 'QVATTCQVQ')  // ATTC does NOT match AxC (two AAs between A and C)
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(true)
+  })
+
+  it('chainMode=binder only checks binder chains', () => {
+    useInterfaceStore.setState({ binderChains: ['A'], targetChains: ['B'] })
+    addLiabilityRule({ presets: ['NG'], chainMode: 'binder' })
+    // NG is only on target chain B, not binder chain A
+    useSequenceStore.getState().mergeSequences(new Map([[filePath, [
+      { chain: 'A', seq: 'QVQLQVQL' },
+      { chain: 'B', seq: 'QVQLNGVQ' },
+    ]]]))
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(true)
+  })
+
+  it('chainMode=binder excludes structure when binder chain contains liability', () => {
+    useInterfaceStore.setState({ binderChains: ['A'], targetChains: ['B'] })
+    addLiabilityRule({ presets: ['NG'], chainMode: 'binder' })
+    useSequenceStore.getState().mergeSequences(new Map([[filePath, [
+      { chain: 'A', seq: 'QVQLNGVQ' },  // NG in binder → should fail
+      { chain: 'B', seq: 'QVQLQVQL' },
+    ]]]))
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(false)
+  })
+
+  it('exposedOnly: buried match (all false mask) does not trigger exclusion', () => {
+    addLiabilityRule({ presets: ['NG'], chainMode: 'all', exposedOnly: true })
+    const seq = 'QVQLNGVQ'
+    const exposedMask = seq.split('').map(() => false)  // all buried
+    seedSequence('A', seq, exposedMask)
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(true)
+  })
+
+  it('exposedOnly: exposed match triggers exclusion', () => {
+    addLiabilityRule({ presets: ['NG'], chainMode: 'all', exposedOnly: true })
+    const seq = 'QVQLNGVQ'
+    // N is at index 4, G at index 5 — mark G as exposed
+    const exposedMask = [false, false, false, false, false, true, false, false]
+    seedSequence('A', seq, exposedMask)
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(false)
+  })
+
+  it('multiple presets: fails when any preset matches', () => {
+    addLiabilityRule({ presets: ['NG', 'DG'], chainMode: 'all' })
+    seedSequence('A', 'QVQLNG')  // NG matches, no DG
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(false)
+  })
+
+  it('liability rule persists and round-trips through preset export/import', () => {
+    addLiabilityRule({ presets: ['NG', 'DG'], chainMode: 'all' })
+    useFilterStore.getState().savePreset('liabilityPreset')
+    const id = useFilterStore.getState().presets[0].id
+    const json = useFilterStore.getState().exportPresetJSON(id)
+    useFilterStore.getState().clearRules()
+    useFilterStore.getState().loadPreset(id)
+    const rule = useFilterStore.getState().rules[0] as LiabilityFilterRule
+    expect(rule.type).toBe('liability')
+    expect(rule.presets).toEqual(['NG', 'DG'])
+    // Also verify exported JSON has the rule
+    const parsed = JSON.parse(json)
+    expect(parsed.rules[0].type).toBe('liability')
   })
 })

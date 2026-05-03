@@ -10,6 +10,9 @@ export const BUILTIN_LABELS: Record<string, string> = {
   n_contacts:        'Atom contacts',
   paratope_residues: 'Paratope residues',
   epitope_residues:  'Epitope residues',
+  ss_helix_frac: 'Helix %',
+  ss_sheet_frac: 'Sheet %',
+  ss_coil_frac:  'Coil %',
 }
 
 /** Short display label for a column key. */

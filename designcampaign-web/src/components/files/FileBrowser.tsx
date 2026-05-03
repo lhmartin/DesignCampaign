@@ -11,6 +11,7 @@ import type { FileInfo } from '@/types/electron'
 import { APP_DEFAULTS } from '@/lib/constants/app'
 import { FileTree } from './FileTree'
 import { readFileContent } from '@/lib/fsa'
+import { CloudConnectionDialog } from './CloudConnectionDialog'
 
 
 interface FileBrowserProps {
@@ -61,8 +62,9 @@ function buildDirTree(files: FileInfo[], currentFolder: string | null): DirNode 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function FileBrowser({ viewerRef }: FileBrowserProps) {
-  const { currentFolder, files, activeFile, isScanning, openFolder, refreshFiles, setActiveFile } =
+  const { currentFolder, files, allCloudFiles, activeFile, isScanning, openFolder, openCloudConnection, refreshFiles, setActiveFile } =
     useFileStore()
+  const [showCloudDialog, setShowCloudDialog] = useState(false)
   const { setLoading } = useProteinStore()
   const { groups, isGrouping, progress, startGrouping, clearGroups, viewMode, setViewMode } = useGroupStore()
   const { autoLoadSidecars, clearAll: clearMetrics } = useMetricsStore()
@@ -113,7 +115,14 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
     // so autoLoadSidecars never triggers ENOENT errors in the main process.
     const loadSidecars = async () => {
       let jsonSet: Set<string>
-      if (window.electronAPI && currentFolder) {
+      if (window.electronAPI && currentFolder?.startsWith('cloud://')) {
+        // Use the already-fetched full cloud listing — no extra round-trip needed
+        jsonSet = new Set(
+          allCloudFiles
+            .filter(f => f.name.endsWith('.json'))
+            .map(f => f.path)
+        )
+      } else if (window.electronAPI && currentFolder) {
         const jsonFiles = await window.electronAPI.listFiles(currentFolder, ['json'])
         jsonSet = new Set(jsonFiles.map(f => f.path))
       } else {
@@ -124,7 +133,7 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
     }
     loadSidecars()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files])
+  }, [files, allCloudFiles])
 
   const handleFileClick = async (file: FileInfo, e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -153,6 +162,15 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
 
   return (
     <div className="flex flex-col h-full bg-[var(--color-background)]">
+      {showCloudDialog && (
+        <CloudConnectionDialog
+          onConnect={async (id) => {
+            setShowCloudDialog(false)
+            await openCloudConnection(id)
+          }}
+          onClose={() => setShowCloudDialog(false)}
+        />
+      )}
       {/* Header toolbar */}
       <div className="flex items-center gap-1 px-2 py-2 border-b border-[var(--color-border)] shrink-0">
         <button
@@ -162,6 +180,14 @@ export function FileBrowser({ viewerRef }: FileBrowserProps) {
         >
           <FolderIcon />
           Open Folder
+        </button>
+        <button
+          onClick={() => setShowCloudDialog(true)}
+          className="flex items-center gap-1.5 px-2 py-1 text-xs rounded hover:bg-[var(--color-secondary-bg)] text-[var(--color-text-primary)] transition-colors"
+          title="Open Cloud Storage"
+        >
+          <CloudIcon />
+          Cloud
         </button>
         {currentFolder && (
           <button
@@ -422,7 +448,7 @@ function FileRow({
   const { showFilteredInBrowser, rules, passesFilters } = useFilterStore()
   const metrics = useMetricsStore(s => s.rows.find(r => r.filePath === file.path)?.metrics)
   const isFilteredOut = showFilteredInBrowser
-    && rules.some(r => r.type === 'numeric' ? !!r.metric : !!r.residues?.trim())
+    && rules.some(r => r.type === 'residue' ? !!(r.residues?.trim()) : r.type === 'liability' ? r.presets.length > 0 || r.customPatterns.length > 0 : !!r.metric)
     && metrics !== undefined
     && !passesFilters(metrics, file.path)
 
@@ -473,6 +499,14 @@ function RefreshIcon({ spinning = false }: { spinning?: boolean }) {
       <polyline points="23 4 23 10 17 10" />
       <polyline points="1 20 1 14 7 14" />
       <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  )
+}
+
+function CloudIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
     </svg>
   )
 }

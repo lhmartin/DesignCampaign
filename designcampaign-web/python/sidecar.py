@@ -100,6 +100,73 @@ def _antpack_number(args: dict) -> list:
     return [f.result() for f in futures]
 
 
+# ── Structure annotation action (SS + SASA) ───────────────────────────────────
+
+def _compute_structure_annotations(args: dict) -> dict:
+    """
+    For each PDB file path, compute:
+      - ss_helix_frac / ss_sheet_frac / ss_coil_frac  (all-chain, backbone geometry)
+      - per-chain exposed_mask: bool[] in ATOM-record residue order
+        (True = residue summed heavy-atom SASA > 20 Å²)
+
+    Returns {filePath: {ss_helix_frac, ss_sheet_frac, ss_coil_frac,
+                        chains: {chainId: {exposed_mask: [bool, ...]}}}}
+    Files that fail to parse are silently skipped.
+    """
+    import biotite.structure as struc
+    import biotite.structure.io.pdb as pdb_io
+    import numpy as np
+
+    SASA_THRESHOLD = 20.0  # Å² per residue
+
+    results: dict = {}
+    for file_path in args.get('filePaths', []):
+        try:
+            pdb_file   = pdb_io.PDBFile.read(file_path)
+            atom_array = pdb_io.get_structure(pdb_file, model=1)
+
+            # ── SS fractions ──────────────────────────────────────────────────
+            backbone = atom_array[struc.filter_backbone(atom_array)]
+            sse      = struc.annotate_sse(backbone)  # 'a'=helix 'b'=sheet 'c'=coil
+            total    = len(sse)
+            if total == 0:
+                ss = {'ss_helix_frac': 0.0, 'ss_sheet_frac': 0.0, 'ss_coil_frac': 1.0}
+            else:
+                helix = int(np.sum(sse == 'a'))
+                sheet = int(np.sum(sse == 'b'))
+                ss = {
+                    'ss_helix_frac': round(helix / total, 4),
+                    'ss_sheet_frac': round(sheet / total, 4),
+                    'ss_coil_frac':  round((total - helix - sheet) / total, 4),
+                }
+
+            # ── Per-chain solvent exposure masks ──────────────────────────────
+            # Compute SASA on the full structure (inter-chain contacts matter).
+            # NOTE: mask indices align to ATOM-record residue order. For designed
+            # binders (RFdiffusion/ProteinMPNN) this matches SEQRES order exactly.
+            heavy      = atom_array[atom_array.element != 'H']
+            atom_sasa  = struc.sasa(heavy)  # per-atom SASA in Å²
+
+            chain_masks: dict = {}
+            for chain_id in np.unique(heavy.chain_id):
+                chain_mask  = heavy.chain_id == chain_id
+                chain_atoms = heavy[chain_mask]
+                chain_sasa  = atom_sasa[chain_mask]
+
+                res_starts = struc.get_residue_starts(chain_atoms)
+                exposed: list[bool] = []
+                for i in range(len(res_starts)):
+                    start = res_starts[i]
+                    end   = res_starts[i + 1] if i + 1 < len(res_starts) else len(chain_atoms)
+                    exposed.append(bool(chain_sasa[start:end].sum() > SASA_THRESHOLD))
+                chain_masks[str(chain_id)] = {'exposed_mask': exposed}
+
+            results[file_path] = {**ss, 'chains': chain_masks}
+        except Exception:
+            pass
+    return results
+
+
 # ── Dispatch table ────────────────────────────────────────────────────────────
 
 def _dispatch(action: str, args: dict):
@@ -107,6 +174,8 @@ def _dispatch(action: str, args: dict):
         return 'pong'
     if action == 'antpack_number':
         return _antpack_number(args)
+    if action == 'compute_structure_annotations':
+        return _compute_structure_annotations(args)
     raise ValueError(f'Unknown action: {action!r}')
 
 

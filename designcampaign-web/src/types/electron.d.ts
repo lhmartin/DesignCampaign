@@ -1,3 +1,27 @@
+export interface CloudConnectionMeta {
+  id: string
+  provider: 'azure' | 'gcs'
+  label: string
+  azureBaseUrl?: string
+  azurePrefix?: string
+  gcsBucket?: string
+  gcsPrefix?: string
+  gcsSaEmail?: string
+  createdAt: number
+}
+
+export interface AddConnectionInput {
+  provider: 'azure' | 'gcs'
+  label: string
+  sasUrl?: string
+  azurePrefix?: string
+  serviceAccountJson?: string
+  gcsBucket?: string
+  gcsPrefix?: string
+}
+
+export type TestConnectionInput = Omit<AddConnectionInput, 'label'>
+
 export interface FileInfo {
   name: string
   path: string
@@ -53,6 +77,17 @@ export interface ElectronAPI {
   marimoInstall(): Promise<{ ok: boolean; error?: string }>
   marimoUpdateContext(ctx: unknown): Promise<{ contextPath: string; metricsPath: string }>
   onMarimoInstallProgress(callback: (msg: { done: boolean; message?: string }) => void): () => void
+
+  // Open URL in system browser
+  openExternal(url: string): void
+
+  // Cloud storage
+  cloudListConnections(): Promise<CloudConnectionMeta[]>
+  cloudAddConnection(input: AddConnectionInput): Promise<{ ok: boolean; id?: string; error?: string }>
+  cloudDeleteConnection(id: string): Promise<{ ok: boolean }>
+  cloudTestConnection(input: TestConnectionInput): Promise<{ ok: boolean; error?: string; fileCount?: number }>
+  cloudListFiles(id: string): Promise<FileInfo[]>
+  cloudReadFile(path: string): Promise<string>
 }
 
 declare global {

@@ -5,6 +5,7 @@ import { extractMetricsFromPDB } from '@/lib/parsers/pdb-metrics'
 import { parseChainSequences } from '@/lib/parsers/pdb-sequence'
 import { useSequenceStore } from '@/stores/sequence-store'
 import { getFileStem } from '@/lib/utils'
+import { pythonCall } from '@/lib/python-bridge'
 
 export interface ProteinMetrics {
   name: string
@@ -52,6 +53,7 @@ interface MetricsStore {
    */
   batchInjectResults: (data: Array<{ filePath: string; name: string; metrics: Record<string, number> }>) => void
   clearAll: () => void
+  calculateStructureAnnotations: (files: FileInfo[]) => Promise<void>
 }
 
 function mergeColumns(current: string[], newCols: string[]): string[] {
@@ -254,6 +256,55 @@ export const useMetricsStore = create<MetricsStore>()(
       }
     } finally {
       set({ isCalculating: false, progress: 1 })
+      get().calculateStructureAnnotations(files).catch(() => {})
+    }
+  },
+
+  calculateStructureAnnotations: async (files) => {
+    const BATCH = 10
+    for (let i = 0; i < files.length; i += BATCH) {
+      const batch = files.slice(i, i + BATCH)
+      try {
+        type ChainData   = { exposed_mask: boolean[] }
+        type FileResult  = {
+          ss_helix_frac: number; ss_sheet_frac: number; ss_coil_frac: number
+          chains: Record<string, ChainData>
+        }
+        const result = await pythonCall<Record<string, FileResult>>(
+          'compute_structure_annotations',
+          { filePaths: batch.map(f => f.path) },
+        )
+
+        // ── SS metrics → metrics store ──────────────────────────────────────
+        const ssRows: ProteinMetrics[] = Object.entries(result).map(([fp, d]) => ({
+          name:     getFileStem(fp),
+          filePath: fp,
+          metrics:  {
+            ss_helix_frac: d.ss_helix_frac,
+            ss_sheet_frac: d.ss_sheet_frac,
+            ss_coil_frac:  d.ss_coil_frac,
+          },
+        }))
+        if (ssRows.length > 0) {
+          set(s => ({
+            rows:       upsertRows(s.rows, ssRows),
+            allColumns: mergeColumns(s.allColumns, ['ss_helix_frac', 'ss_sheet_frac', 'ss_coil_frac']),
+          }))
+        }
+
+        // ── SASA exposure masks → sequence store ────────────────────────────
+        const seqPatch = new Map<string, import('@/stores/sequence-store').ChainSeq[]>()
+        for (const [fp, data] of Object.entries(result)) {
+          const existing = useSequenceStore.getState().sequences.get(fp)
+          if (!existing) continue
+          seqPatch.set(fp, existing.map(cs => ({
+            ...cs,
+            exposedMask: data.chains[cs.chain]?.exposed_mask,
+          })))
+        }
+        if (seqPatch.size > 0) useSequenceStore.getState().mergeSequences(seqPatch)
+
+      } catch { /* sidecar unavailable or timeout — skip batch silently */ }
     }
   },
 
