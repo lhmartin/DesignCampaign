@@ -283,9 +283,14 @@ const MARIMO_CONTEXT_PATH = path.join(app.getPath('userData'), 'marimo_context.j
 const MARIMO_METRICS_PATH = path.join(app.getPath('userData'), 'marimo_metrics.csv')
 
 
-async function waitForMarimoReady(port: number, timeoutMs = 30_000): Promise<void> {
+async function waitForMarimoReady(port: number, proc: ChildProcess, stderrLines: string[], timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    // Fail immediately if the process already died — no point waiting 30s
+    if (proc.exitCode !== null) {
+      const detail = stderrLines.slice(-10).join('\n') || '(no output)'
+      throw new Error(`Marimo process exited with code ${proc.exitCode}:\n${detail}`)
+    }
     try {
       const res = await fetch(`http://127.0.0.1:${port}/`, {
         signal: AbortSignal.timeout(1000),
@@ -294,7 +299,8 @@ async function waitForMarimoReady(port: number, timeoutMs = 30_000): Promise<voi
     } catch { /* not ready yet */ }
     await new Promise(r => setTimeout(r, 500))
   }
-  throw new Error('Marimo server did not start within 30 seconds')
+  const detail = stderrLines.slice(-10).join('\n') || '(no output)'
+  throw new Error(`Marimo server did not start within 30 seconds:\n${detail}`)
 }
 
 function seedNotebook(nbPath: string): void {
@@ -379,24 +385,23 @@ ipcMain.handle('marimo:start', async (_evt, notebookPath: string) => {
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      // Only expose safe env vars — avoid leaking API keys or secrets.
-      // Cast via spread so TS's ProcessEnv augmentation doesn't complain.
+      // Pass the full environment so Python/marimo has access to SSL certs,
+      // system libraries, and platform-specific paths in the packaged app.
+      // DESIGNCAMPAIGN_* vars are added on top.
       env: {
-        ...({} as NodeJS.ProcessEnv),
-        PATH: process.env['PATH'],
-        HOME: process.env['HOME'],
-        USERPROFILE: process.env['USERPROFILE'],
-        APPDATA: process.env['APPDATA'],
-        TEMP: process.env['TEMP'],
-        TMPDIR: process.env['TMPDIR'],
+        ...process.env,
         DESIGNCAMPAIGN_CONTEXT_PATH: MARIMO_CONTEXT_PATH,
         DESIGNCAMPAIGN_METRICS_PATH: MARIMO_METRICS_PATH,
-      } satisfies NodeJS.ProcessEnv,
+      },
     },
   )
 
+  const stderrLines: string[] = []
   createInterface({ input: marimoProc.stderr! }).on('line', line => {
-    if (line.trim()) console.log('[marimo]', line)
+    if (line.trim()) {
+      console.log('[marimo]', line)
+      stderrLines.push(line)
+    }
   })
 
   marimoProc.on('exit', (code, signal) => {
@@ -405,7 +410,7 @@ ipcMain.handle('marimo:start', async (_evt, notebookPath: string) => {
     marimoPort = null
   })
 
-  await waitForMarimoReady(port)
+  await waitForMarimoReady(port, marimoProc, stderrLines)
   marimoPort = port
   return { port, contextPath: MARIMO_CONTEXT_PATH }
   } finally {
