@@ -44,7 +44,8 @@ export function AppShell() {
   const { activeFile, currentFolder, setFolder } = useFileStore()
   const { activeTab, setActiveTab } = useUIStore()
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
-  const isMac = window.electronAPI?.platform === 'darwin'
+  const isMac     = window.electronAPI?.platform === 'darwin'
+  const isWindows = window.electronAPI?.platform === 'win32'
   const [showPythonSetup, setShowPythonSetup] = useState(false)
   const [rightPanelMode, setRightPanelMode] = useState<'viewer' | 'notebook'>('viewer')
   const [showTour, setShowTour] = useState(() => !localStorage.getItem('dc-onboarding-done'))
@@ -107,7 +108,7 @@ export function AppShell() {
         alignItems: 'center',
         gap: 8,
         paddingLeft: isMac ? 80 : 12,
-        paddingRight: 12,
+        paddingRight: isWindows ? 150 : 12,
         height: 32,
         flexShrink: 0,
         borderBottom: '1px solid var(--color-border)',
