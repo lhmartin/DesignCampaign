@@ -1,5 +1,10 @@
+import { isCloudPath } from '@/lib/cloud-paths'
+
 /** Read a file via Electron IPC or the stored FileSystemDirectoryHandle (FSA browser mode). */
 export async function readFileContent(filePath: string): Promise<string> {
+  if (window.electronAPI && isCloudPath(filePath)) {
+    return window.electronAPI.cloudReadFile(filePath)
+  }
   if (window.electronAPI) {
     return window.electronAPI.readFile(filePath)
   }

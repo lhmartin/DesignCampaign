@@ -3,6 +3,7 @@ import { create } from 'zustand'
 export interface ChainSeq {
   chain: string
   seq: string
+  exposedMask?: boolean[]
 }
 
 interface SequenceStore {

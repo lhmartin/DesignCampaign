@@ -2,25 +2,31 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { FileInfo } from '@/types/electron'
 import { APP_DEFAULTS } from '@/lib/constants/app'
+import { isCloudPath, parseCloudPath } from '@/lib/cloud-paths'
 
 interface FileStore {
   currentFolder: string | null
   files: FileInfo[]
+  allCloudFiles: FileInfo[]   // full cloud listing incl .json sidecars; empty for local folders
   activeFile: string | null
   isScanning: boolean
   error: string | null
 
   openFolder: () => Promise<void>
+  openCloudConnection: (id: string) => Promise<void>
   refreshFiles: () => Promise<void>
   setActiveFile: (path: string | null) => void
   setFolder: (folder: string) => Promise<void>
 }
+
+const STRUCTURE_EXTS = new Set(['.pdb', '.cif', '.mmcif'])
 
 export const useFileStore = create<FileStore>()(
   persist(
     (set, get) => ({
   currentFolder: null,
   files: [],
+  allCloudFiles: [],
   activeFile: null,
   isScanning: false,
   error: null,
@@ -56,7 +62,6 @@ export const useFileStore = create<FileStore>()(
         await scanDir(dirHandle, '')
         files.sort((a, b) => a.name.localeCompare(b.name))
         set({ currentFolder: dirHandle.name, files, isScanning: false, error: null })
-        // Store the directory handle for later file reads
         ;(window as Window & { __dirHandle?: FileSystemDirectoryHandle }).__dirHandle = dirHandle
       } catch (err) {
         if (err instanceof Error && err.name !== 'AbortError') {
@@ -66,9 +71,33 @@ export const useFileStore = create<FileStore>()(
     }
   },
 
+  openCloudConnection: async (id: string) => {
+    if (!window.electronAPI) return
+    set({ isScanning: true, error: null, files: [], allCloudFiles: [] })
+    try {
+      const connections = await window.electronAPI.cloudListConnections()
+      const conn = connections.find(c => c.id === id)
+      if (!conn) { set({ isScanning: false, error: `Cloud connection not found: ${id}` }); return }
+      set({ currentFolder: `cloud://${conn.provider}/${id}` })
+      const all = await window.electronAPI.cloudListFiles(id)
+      const structureFiles = all.filter(f => {
+        const ext = f.name.slice(f.name.lastIndexOf('.')).toLowerCase()
+        return STRUCTURE_EXTS.has(ext)
+      })
+      set({ files: structureFiles, allCloudFiles: all, isScanning: false })
+    } catch (err) {
+      set({ isScanning: false, error: err instanceof Error ? err.message : 'Failed to list cloud files' })
+    }
+  },
+
   setFolder: async (folder: string) => {
     if (!window.electronAPI) return
-    set({ currentFolder: folder, isScanning: true, error: null, files: [] })
+    if (isCloudPath(folder)) {
+      const { connectionId } = parseCloudPath(folder)
+      await get().openCloudConnection(connectionId)
+      return
+    }
+    set({ currentFolder: folder, isScanning: true, error: null, files: [], allCloudFiles: [] })
     try {
       const files = await window.electronAPI.listFiles(
         folder,
@@ -86,6 +115,11 @@ export const useFileStore = create<FileStore>()(
   refreshFiles: async () => {
     const { currentFolder } = get()
     if (!currentFolder) return
+    if (isCloudPath(currentFolder)) {
+      const { connectionId } = parseCloudPath(currentFolder)
+      await get().openCloudConnection(connectionId)
+      return
+    }
     await get().setFolder(currentFolder)
   },
 

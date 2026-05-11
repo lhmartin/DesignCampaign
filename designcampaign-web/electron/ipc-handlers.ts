@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow, safeStorage, app } from 'electron'
+import { ipcMain, dialog, BrowserWindow, safeStorage, app, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import net from 'node:net'
@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import Anthropic from '@anthropic-ai/sdk'
 import { isEnvReady, getPythonExe, getSidecarScriptPath, runSetup, installPackages } from './python-setup'
+import { registerCloudHandlers } from './cloud-handlers'
 
 export interface FileInfo {
   name: string
@@ -47,7 +48,13 @@ export function registerMarimoInstall(getMainWindow: () => BrowserWindow | null)
 }
 
 export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
+  registerCloudHandlers()
   registerMarimoInstall(getMainWindow)
+
+  // Open URL in system default browser — only allow http(s) to prevent shell injection via custom schemes
+  ipcMain.on('open-external', (_event, url: string) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+  })
 
   // Open native folder dialog
   ipcMain.handle('dialog:openFolder', async () => {

@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { useFilterStore, type ComparisonOp, type RankingMode, type RankingMetric, type FilterRule, type NumericFilterRule, type ResidueFilterRule } from '@/stores/filter-store'
+import { useFilterStore, type ComparisonOp, type RankingMode, type RankingMetric, type FilterRule, type NumericFilterRule, type ResidueFilterRule, type LiabilityFilterRule } from '@/stores/filter-store'
 import { useMetricsStore, type ProteinMetrics } from '@/stores/metrics-store'
 import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
+import { useInterfaceStore } from '@/stores/interface-store'
+import { useAntpackStore } from '@/stores/antpack-store'
+import { useSequenceStore } from '@/stores/sequence-store'
+import { LIABILITY_PRESETS, CATEGORY_LABELS, LIABILITY_CATEGORIES, customPatternToRegex, type LiabilityCategory, type Severity } from '@/lib/sequence-liabilities'
 import { shortLabel } from '@/lib/metrics-labels'
 import { downloadBlob } from '@/lib/utils'
 
@@ -306,10 +310,276 @@ function ResidueRuleRow({ rule }: { rule: ResidueFilterRule }) {
   )
 }
 
+// ─── Liability filter rule row ────────────────────────────────────────────────
+
+const SEVERITY_COLOR: Record<Severity, string> = {
+  high:   '#f87171',
+  medium: '#f59e0b',
+  low:    'var(--color-text-disabled)',
+}
+
+// Default open categories (highest-risk)
+const DEFAULT_OPEN_CATEGORIES = new Set<LiabilityCategory>(['deamidation', 'isomerization'])
+
+function LiabilityRuleRow({ rule }: { rule: LiabilityFilterRule }) {
+  const { updateRule, removeRule } = useFilterStore.getState()
+  const binderChains  = useInterfaceStore(s => s.binderChains)
+  const hasCdr        = useAntpackStore(s => s.annotations.size > 0)
+  const hasExposure   = useSequenceStore(s => {
+    for (const chains of s.sequences.values()) {
+      if (chains.some(c => c.exposedMask !== undefined)) return true
+    }
+    return false
+  })
+
+  const [openCats, setOpenCats]           = useState<Set<LiabilityCategory>>(DEFAULT_OPEN_CATEGORIES)
+  const [customInput, setCustomInput]     = useState('')
+  const [customError, setCustomError]     = useState(false)
+  const [infoFor, setInfoFor]             = useState<string | null>(null)
+
+  const toggleCat = (cat: LiabilityCategory) =>
+    setOpenCats(s => { const n = new Set(s); n.has(cat) ? n.delete(cat) : n.add(cat); return n })
+
+  const togglePreset = (id: string) => {
+    const next = rule.presets.includes(id)
+      ? rule.presets.filter(p => p !== id)
+      : [...rule.presets, id]
+    updateRule(rule.id, { presets: next })
+  }
+
+  const addCustom = () => {
+    const v = customInput.trim()
+    if (!v) return
+    if (!customPatternToRegex(v)) { setCustomError(true); return }
+    setCustomError(false)
+    setCustomInput('')
+    updateRule(rule.id, { customPatterns: [...rule.customPatterns, v] })
+  }
+
+  const removeCustom = (p: string) =>
+    updateRule(rule.id, { customPatterns: rule.customPatterns.filter(c => c !== p) })
+
+  const openExternal = (url: string) => window.electronAPI?.openExternal?.(url)
+
+  const infoPreset = infoFor ? LIABILITY_PRESETS.find(p => p.id === infoFor) : null
+
+  const selStyle: React.CSSProperties = {
+    fontSize: 11,
+    fontFamily: 'Outfit, sans-serif',
+    color: 'var(--color-text-primary)',
+    background: 'var(--color-background)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 4,
+    padding: '2px 18px 2px 5px',
+    outline: 'none',
+    cursor: 'pointer',
+  }
+
+  return (
+    <div style={{
+      padding: '6px 12px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6,
+      borderBottom: '1px solid var(--color-border)',
+    }}>
+
+      {/* ── Header row ─── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-primary)', flex: 1 }}>
+          Sequence Liabilities
+        </span>
+        <button
+          onClick={() => removeRule(rule.id)}
+          title="Remove rule"
+          style={{
+            width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 3, border: 'none', background: 'none',
+            color: 'var(--color-text-disabled)', cursor: 'pointer', fontSize: 13, padding: 0,
+          }}
+        >×</button>
+      </div>
+
+      {/* ── Chain mode + scope options ─── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <select
+          value={rule.chainMode}
+          onChange={e => updateRule(rule.id, { chainMode: e.target.value as 'binder' | 'all' })}
+          style={{ ...selStyle }}
+          title="Which chains to check for liabilities"
+        >
+          <option value="binder">Binder chains</option>
+          <option value="all">All chains</option>
+        </select>
+
+        {rule.chainMode === 'binder' && binderChains.length === 0 && (
+          <span style={{ fontSize: 10, color: '#f87171' }} title="Set binder chains in Interface panel">
+            ⚠ No binder set
+          </span>
+        )}
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: hasCdr ? 'var(--color-text-secondary)' : 'var(--color-text-disabled)', cursor: hasCdr ? 'pointer' : 'default', userSelect: 'none' }}
+          title={hasCdr ? 'Only flag matches within CDR positions' : 'Run AntPack numbering first'}>
+          <input
+            type="checkbox"
+            checked={rule.cdrOnly}
+            disabled={!hasCdr}
+            onChange={e => updateRule(rule.id, { cdrOnly: e.target.checked })}
+            style={{ accentColor: 'var(--color-accent)', cursor: hasCdr ? 'pointer' : 'default' }}
+          />
+          CDR only
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: hasExposure ? 'var(--color-text-secondary)' : 'var(--color-text-disabled)', cursor: hasExposure ? 'pointer' : 'default', userSelect: 'none' }}
+          title={hasExposure ? 'Only flag solvent-exposed positions' : 'Load structure annotations first'}>
+          <input
+            type="checkbox"
+            checked={rule.exposedOnly}
+            disabled={!hasExposure}
+            onChange={e => updateRule(rule.id, { exposedOnly: e.target.checked })}
+            style={{ accentColor: 'var(--color-accent)', cursor: hasExposure ? 'pointer' : 'default' }}
+          />
+          Exposed only
+        </label>
+      </div>
+
+      {/* ── Preset categories ─── */}
+      {LIABILITY_CATEGORIES.map(cat => {
+        const catPresets = LIABILITY_PRESETS.filter(p => p.category === cat)
+        const open       = openCats.has(cat)
+        return (
+          <div key={cat}>
+            <button
+              onClick={() => toggleCat(cat)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4, width: '100%',
+                background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0',
+                color: 'var(--color-text-secondary)', fontSize: 10, fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+              }}
+            >
+              <span style={{ fontSize: 8 }}>{open ? '▾' : '▶'}</span>
+              {CATEGORY_LABELS[cat]}
+            </button>
+
+            {open && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 8px', paddingLeft: 10, paddingTop: 2 }}>
+                {catPresets.map(p => (
+                  <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <label style={{
+                      display: 'flex', alignItems: 'center', gap: 3,
+                      fontSize: 11, color: 'var(--color-text-primary)',
+                      cursor: 'pointer', userSelect: 'none',
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={rule.presets.includes(p.id)}
+                        onChange={() => togglePreset(p.id)}
+                        style={{ accentColor: 'var(--color-accent)', cursor: 'pointer' }}
+                      />
+                      {p.id}
+                      <span style={{ color: SEVERITY_COLOR[p.severity], fontSize: 9 }}>●</span>
+                    </label>
+                    <button
+                      onClick={() => setInfoFor(infoFor === p.id ? null : p.id)}
+                      title={p.description}
+                      style={{
+                        width: 14, height: 14, borderRadius: '50%', border: '1px solid var(--color-border)',
+                        background: infoFor === p.id ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)' : 'none',
+                        color: 'var(--color-text-disabled)', cursor: 'pointer',
+                        fontSize: 9, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >i</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {/* ── Info popover ─── */}
+      {infoPreset && (
+        <div style={{
+          background: 'var(--color-secondary-bg)', border: '1px solid var(--color-border)',
+          borderRadius: 6, padding: '8px 10px', fontSize: 11, lineHeight: 1.5,
+          color: 'var(--color-text-secondary)',
+        }}>
+          <p style={{ margin: '0 0 6px', color: 'var(--color-text-primary)', fontWeight: 600 }}>{infoPreset.name}</p>
+          <p style={{ margin: '0 0 6px' }}>{infoPreset.description}</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {infoPreset.links.map(l => (
+              <button
+                key={l.url}
+                onClick={() => openExternal(l.url)}
+                style={{
+                  fontSize: 10, padding: '1px 6px', borderRadius: 3,
+                  border: '1px solid var(--color-border)', background: 'none',
+                  color: 'var(--color-accent)', cursor: 'pointer',
+                }}
+              >{l.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Custom patterns ─── */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <input
+            type="text"
+            value={customInput}
+            placeholder="Custom pattern (e.g. AxC)"
+            onChange={e => { setCustomInput(e.target.value); setCustomError(false) }}
+            onKeyDown={e => { if (e.key === 'Enter') addCustom() }}
+            title="AxC = A, any amino acid, C.  AxxC = A, two amino acids, C."
+            style={{
+              flex: 1, fontSize: 11, fontFamily: 'JetBrains Mono, monospace',
+              color: 'var(--color-text-primary)', background: 'var(--color-background)',
+              border: `1px solid ${customError ? '#f87171' : 'var(--color-border)'}`,
+              borderRadius: 4, padding: '2px 5px', outline: 'none',
+            }}
+          />
+          <SmallBtn onClick={addCustom} variant="accent">+ Add</SmallBtn>
+        </div>
+        {customError && (
+          <span style={{ fontSize: 10, color: '#f87171' }}>Invalid pattern</span>
+        )}
+        {rule.customPatterns.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {rule.customPatterns.map(p => (
+              <span key={p} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                fontSize: 11, fontFamily: 'JetBrains Mono, monospace',
+                padding: '1px 6px', borderRadius: 3,
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-secondary-bg)',
+                color: 'var(--color-text-primary)',
+              }}>
+                {p}
+                <button
+                  onClick={() => removeCustom(p)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                    color: 'var(--color-text-disabled)', fontSize: 12, lineHeight: 1,
+                  }}
+                >×</button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+    </div>
+  )
+}
+
 // ─── Filter rule row dispatcher ───────────────────────────────────────────────
 
 function FilterRuleRow({ rule, allColumns }: { rule: FilterRule; allColumns: string[] }) {
-  if (rule.type === 'residue') return <ResidueRuleRow rule={rule} />
+  if (rule.type === 'residue')   return <ResidueRuleRow rule={rule} />
+  if (rule.type === 'liability') return <LiabilityRuleRow rule={rule} />
   return <NumericRuleRow rule={rule} allColumns={allColumns} />
 }
 
@@ -491,7 +761,7 @@ export function FilterPanel() {
 
   // Actions are stable references — no reactive subscription needed.
   const {
-    addRule, addResidueRule, clearRules, setRankingMode, syncRankingMetrics,
+    addRule, addResidueRule, addLiabilityRule, clearRules, setRankingMode, syncRankingMetrics,
     toggleShowFilteredInBrowser, savePreset, importPresetJSON,
   } = useFilterStore.getState()
   const { injectColumn } = useMetricsStore.getState()
@@ -526,9 +796,11 @@ export function FilterPanel() {
   // Filter out virtual columns from numeric filter rule dropdowns
   const numericColumns = allColumns.filter(c => c !== 'paratope_residues' && c !== 'epitope_residues')
 
-  const activeRuleCount = rules.filter(r =>
-    r.type === 'residue' ? !!(r.residues?.trim()) : !!(r as NumericFilterRule).metric
-  ).length
+  const activeRuleCount = rules.filter(r => {
+    if (r.type === 'residue')   return !!(r.residues?.trim())
+    if (r.type === 'liability') return r.presets.length > 0 || r.customPatterns.length > 0
+    return !!(r as NumericFilterRule).metric
+  }).length
   const activeRankingMetrics = rankingMetrics.filter(m => m.active)
   const activeRankingCount   = activeRankingMetrics.length
 
@@ -580,6 +852,7 @@ export function FilterPanel() {
       <div style={{ display: 'flex', gap: 6, padding: '0 12px 10px', alignItems: 'center' }}>
         <SmallBtn onClick={addRule} variant="accent">+ Metric</SmallBtn>
         <SmallBtn onClick={addResidueRule} variant="accent">+ Residue</SmallBtn>
+        <SmallBtn onClick={addLiabilityRule} variant="accent">+ Liability</SmallBtn>
         {rules.length > 0 && <SmallBtn onClick={clearRules} variant="danger">Clear all</SmallBtn>}
       </div>
 
