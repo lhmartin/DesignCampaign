@@ -201,7 +201,7 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
 
     for (const row of rows) {
       if (!row.filePath) continue
-      const chainSeqs = sequences.get(row.name)
+      const chainSeqs = sequences.get(row.filePath)
       if (!chainSeqs?.length) continue
       for (const cs of chainSeqs) {
         batch.push({ filePath: row.filePath, name: row.name, chain: cs.chain, sequence: cs.seq })

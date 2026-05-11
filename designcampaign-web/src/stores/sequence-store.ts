@@ -6,7 +6,7 @@ export interface ChainSeq {
 }
 
 interface SequenceStore {
-  /** Sequences for all loaded structures, keyed by display name (matches ProteinMetrics.name). */
+  /** Sequences for all loaded structures, keyed by file path (matches ProteinMetrics.filePath). */
   sequences: Map<string, ChainSeq[]>
   setSequences: (name: string, chains: ChainSeq[]) => void
   /** Merge a batch of sequences in a single store update — O(N) vs O(N²) for N entries. */
