@@ -1,5 +1,9 @@
 # DesignCampaign
 
+<p align="center">
+  <img src="designcampaign-web/resources/icon.svg" alt="DesignCampaign" width="120" />
+</p>
+
 A desktop application for viewing and analysing protein structure design campaigns. Load a folder of PDB/CIF files, extract or import metrics, filter and rank designs, visualise structures in 3D, and detect binding interfaces — all in one place.
 
 [![Windows](https://img.shields.io/badge/Windows-0078D6?logo=windows&logoColor=white)](https://github.com/lhmartin/DesignCampaign/releases)
