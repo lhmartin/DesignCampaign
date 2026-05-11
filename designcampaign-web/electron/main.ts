@@ -49,6 +49,13 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 600,
     title: 'DesignCampaign',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#1c2340',
+      symbolColor: '#c4d4ec',
+      height: 32,
+    },
+    trafficLightPosition: { x: 12, y: 8 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -110,6 +117,10 @@ function createWindow(): void {
 
 // Register IPC handlers before app is ready
 registerIpcHandlers(() => win)
+
+ipcMain.on('set-title-bar-overlay', (_e, opts: { color: string; symbolColor: string }) => {
+  win?.setTitleBarOverlay(opts)
+})
 
 app.on('window-all-closed', () => {
   cleanupWatchers()

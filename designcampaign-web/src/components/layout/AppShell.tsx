@@ -44,6 +44,7 @@ export function AppShell() {
   const { activeFile, currentFolder, setFolder } = useFileStore()
   const { activeTab, setActiveTab } = useUIStore()
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light')
+  const isMac = window.electronAPI?.platform === 'darwin'
   const [showPythonSetup, setShowPythonSetup] = useState(false)
   const [rightPanelMode, setRightPanelMode] = useState<'viewer' | 'notebook'>('viewer')
   const [showTour, setShowTour] = useState(() => !localStorage.getItem('dc-onboarding-done'))
@@ -59,6 +60,10 @@ export function AppShell() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
     localStorage.setItem('theme', isDark ? 'dark' : 'light')
+    window.electronAPI?.setTitleBarOverlay?.(isDark
+      ? { color: '#1c2340', symbolColor: '#c4d4ec' }
+      : { color: '#ffffff', symbolColor: '#111827' }
+    )
   }, [isDark])
 
   useEffect(() => {
@@ -101,12 +106,14 @@ export function AppShell() {
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        padding: '0 12px',
+        paddingLeft: isMac ? 80 : 12,
+        paddingRight: 12,
         height: 32,
         flexShrink: 0,
         borderBottom: '1px solid var(--color-border)',
         background: 'var(--color-secondary-bg)',
-      }}>
+        WebkitAppRegion: 'drag',
+      } as React.CSSProperties}>
         <span style={{
           fontFamily: 'Outfit, sans-serif',
           fontWeight: 600,
@@ -126,12 +133,13 @@ export function AppShell() {
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
             maxWidth: 320,
-          }}>
+            WebkitAppRegion: 'no-drag',
+          } as React.CSSProperties}>
             {getFileName(activeFile)}
           </span>
         )}
 
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <button
             onClick={() => setShowTour(true)}
             title="Show feature tour"

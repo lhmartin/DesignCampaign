@@ -117,4 +117,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('marimo:install-progress', listener)
     return () => ipcRenderer.off('marimo:install-progress', listener)
   },
+
+  // Window chrome
+  platform: process.platform,
+  setTitleBarOverlay: (opts: { color: string; symbolColor: string }): void => {
+    ipcRenderer.send('set-title-bar-overlay', opts)
+  },
 })

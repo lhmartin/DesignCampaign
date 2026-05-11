@@ -46,6 +46,10 @@ export interface ElectronAPI {
   onPythonSetupProgress(callback: (message: string) => void): () => void
   onPythonSetupComplete(callback: () => void): () => void
 
+  // Window chrome
+  platform: string
+  setTitleBarOverlay(opts: { color: string; symbolColor: string }): void
+
   // Marimo notebook server
   marimoStart(notebookPath: string): Promise<{ port: number; contextPath: string }>
   marimoStop(): Promise<void>
