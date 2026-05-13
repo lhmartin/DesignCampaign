@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useMolstar } from './hooks/useMolstar'
+import { readViewerBg } from './viewer-bg'
 import { ViewerControls, type RepresentationStyle, type ColorScheme } from './ViewerControls'
 import { PRESETS, type PresetId } from './presets'
 import { SequenceViewer } from './SequenceViewer'
@@ -715,7 +716,9 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
 
     useEffect(() => {
       if (!plugin?.canvas3d) return
-      const bg = viewerBg === 'dark' ? 0x040812 : 0xffffff
+      // 'dark' follows the theme via --color-viewer-bg so the canvas blends with the
+      // surrounding card; 'light' is an explicit white override.
+      const bg = viewerBg === 'dark' ? readViewerBg() : 0xffffff
       try { (plugin.canvas3d as any).setProps({ renderer: { backgroundColor: bg } }) } catch { /* best effort */ }
     }, [plugin, viewerBg])
 
@@ -781,7 +784,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
 
         {/* ── Toolbar row: ViewerControls + CompareMenu ── */}
         {plugin && (
-          <div style={{ display: 'flex', alignItems: 'stretch', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'stretch', flexShrink: 0, gap: 8, padding: '6px 10px' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <ViewerControls
                 style={style}

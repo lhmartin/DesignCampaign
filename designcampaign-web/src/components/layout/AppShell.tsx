@@ -14,6 +14,8 @@ import { FilterPanel } from '@/components/filter/FilterPanel'
 import { UniProtPanel } from '@/components/metrics/UniProtPanel'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { MarimoTab } from '@/components/notebook/MarimoTab'
+import { DetailsInspector } from '@/components/inspector/DetailsInspector'
+import { readViewerBg } from '@/components/viewer/viewer-bg'
 import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { useUIStore } from '@/stores/ui-store'
@@ -53,9 +55,9 @@ export function AppShell() {
   // Persist panel layout across sessions via localStorage.
   // useDefaultLayout reads/writes to localStorage keyed by `id`.
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: 'dc-main-layout',
+    id: 'dc-main-layout-v2',
     storage: localStorage,
-    panelIds: ['left-panel', 'right-panel'],
+    panelIds: ['left-panel', 'center-panel', 'right-panel'],
   })
 
   useEffect(() => {
@@ -65,6 +67,9 @@ export function AppShell() {
       ? { color: '#1c2340', symbolColor: '#c4d4ec' }
       : { color: '#ffffff', symbolColor: '#111827' }
     )
+    // Push the new --color-viewer-bg into the Mol* canvas so it blends with the card.
+    const plugin = viewerRef.current?.getPlugin() as { canvas3d?: { setProps: (p: unknown) => void } } | null
+    try { plugin?.canvas3d?.setProps({ renderer: { backgroundColor: readViewerBg() } }) } catch { /* best effort */ }
   }, [isDark])
 
   useEffect(() => {
@@ -109,7 +114,7 @@ export function AppShell() {
         gap: 8,
         paddingLeft: isMac ? 80 : 12,
         paddingRight: isWindows ? 150 : 12,
-        height: 32,
+        height: 42,
         flexShrink: 0,
         borderBottom: '1px solid var(--color-border)',
         background: 'var(--color-secondary-bg)',
@@ -200,10 +205,10 @@ export function AppShell() {
 
       {/* ── Main panel area ────────────────────────────────────────────────── */}
       {/*
-        8px padding creates visible gaps between cards and window edges.
+        12px padding creates visible gaps between cards and window edges.
         react-resizable-panels measures the padded container, so percentage
-        sizes remain stable. The handle spans the padded height, creating a
-        clean gap between the two cards at its level.
+        sizes remain stable. Handles span the padded height, creating clean
+        gaps between the three cards at their respective levels.
       */}
       <ResizablePanelGroup
         id="main-layout"
@@ -215,13 +220,13 @@ export function AppShell() {
           minHeight: 0,
           width: '100%',
           overflow: 'hidden',
-          padding: 8,
+          padding: 12,
           boxSizing: 'border-box',
         }}
       >
 
         {/* ── Left card: tabbed sidebar ── */}
-        <ResizablePanel id="left-panel" defaultSize="38%" minSize="22%" maxSize="60%">
+        <ResizablePanel id="left-panel" defaultSize="28%" minSize="18%" maxSize="45%">
           <div style={{ ...cardStyle, paddingRight: 0 }}>
             {/*
               Tabs root is flex-col so TabsContent children can expand with flex-1.
@@ -280,8 +285,8 @@ export function AppShell() {
 
         <ResizableHandle withHandle />
 
-        {/* ── Right card: structure viewer / notebook ── */}
-        <ResizablePanel id="right-panel" defaultSize="62%" minSize="30%">
+        {/* ── Center card: structure viewer / notebook ── */}
+        <ResizablePanel id="center-panel" defaultSize="45%" minSize="30%">
           <div data-tour="right-panel" style={{ ...cardStyle, position: 'relative' }}>
 
             {/* Mol* viewer — hidden but kept mounted when in notebook mode */}
@@ -317,6 +322,15 @@ export function AppShell() {
               <MarimoTab />
             </div>
 
+          </div>
+        </ResizablePanel>
+
+        <ResizableHandle withHandle />
+
+        {/* ── Right card: details inspector ── */}
+        <ResizablePanel id="right-panel" defaultSize="27%" minSize="18%" maxSize="45%">
+          <div style={cardStyle}>
+            <DetailsInspector />
           </div>
         </ResizablePanel>
 

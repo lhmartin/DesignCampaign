@@ -1,0 +1,158 @@
+import { useMemo } from 'react'
+import { useFileStore } from '@/stores/file-store'
+import { useMetricsStore } from '@/stores/metrics-store'
+import { useSelectionStore } from '@/stores/selection-store'
+import { useInterfaceStore } from '@/stores/interface-store'
+import { getFileName, getFileStem } from '@/lib/utils'
+
+const sectionHeaderStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-secondary)',
+  padding: '8px 12px 6px',
+  borderBottom: '1px solid var(--color-border)',
+  background: 'var(--color-secondary-bg)',
+}
+
+const rowStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'baseline',
+  padding: '4px 12px',
+  fontSize: 12,
+  lineHeight: 1.35,
+  gap: 8,
+}
+
+const keyStyle: React.CSSProperties = {
+  color: 'var(--color-text-secondary)',
+  whiteSpace: 'nowrap',
+}
+
+const valStyle: React.CSSProperties = {
+  fontFamily: 'JetBrains Mono, monospace',
+  color: 'var(--color-text-primary)',
+  textAlign: 'right',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  maxWidth: '60%',
+}
+
+const KEY_METRICS = ['mean_plddt', 'mean_bfactor', 'num_residues', 'chain_count'] as const
+
+function fmtNum(v: number | undefined): string {
+  if (v === undefined || Number.isNaN(v)) return '—'
+  if (Number.isInteger(v)) return v.toString()
+  return v.toFixed(2)
+}
+
+function fileExt(path: string): string {
+  const m = /\.([^.\\/]+)$/.exec(path)
+  return m ? m[1].toUpperCase() : '—'
+}
+
+export function DetailsInspector() {
+  const activeFile = useFileStore(s => s.activeFile)
+  const rows = useMetricsStore(s => s.rows)
+  const selectedResidues = useSelectionStore(s => s.selectedResidues)
+  const paratope = useInterfaceStore(s => s.paratope)
+  const epitope = useInterfaceStore(s => s.epitope)
+
+  const metricsRow = useMemo(() => {
+    if (!activeFile) return undefined
+    const stem = getFileStem(activeFile)
+    return rows.find(r => r.filePath === activeFile)
+      ?? rows.find(r => r.name === stem)
+  }, [rows, activeFile])
+
+  const selectionSummary = useMemo(() => {
+    if (selectedResidues.size === 0) return null
+    const chains = new Set<string>()
+    for (const k of selectedResidues) {
+      const c = k.split(':')[0]
+      if (c) chains.add(c)
+    }
+    return {
+      count: selectedResidues.size,
+      chains: Array.from(chains).sort(),
+    }
+  }, [selectedResidues])
+
+  if (!activeFile) {
+    return (
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+        color: 'var(--color-text-disabled)',
+        fontSize: 12,
+        textAlign: 'center',
+      }}>
+        No file selected
+      </div>
+    )
+  }
+
+  const interfaceCount = paratope.size + epitope.size
+
+  return (
+    <div style={{
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'auto',
+      minHeight: 0,
+    }}>
+      <div style={sectionHeaderStyle}>Active file</div>
+      <div style={rowStyle}>
+        <span style={keyStyle}>Name</span>
+        <span style={valStyle} title={getFileName(activeFile)}>{getFileName(activeFile)}</span>
+      </div>
+      <div style={rowStyle}>
+        <span style={keyStyle}>Path</span>
+        <span style={{ ...valStyle, direction: 'rtl' }} title={activeFile}>{activeFile}</span>
+      </div>
+      <div style={rowStyle}>
+        <span style={keyStyle}>Format</span>
+        <span style={valStyle}>{fileExt(activeFile)}</span>
+      </div>
+
+      <div style={sectionHeaderStyle}>Metrics</div>
+      {KEY_METRICS.map(key => (
+        <div key={key} style={rowStyle}>
+          <span style={keyStyle}>{key}</span>
+          <span style={valStyle}>{fmtNum(metricsRow?.metrics[key])}</span>
+        </div>
+      ))}
+
+      <div style={sectionHeaderStyle}>Selection</div>
+      {selectionSummary ? (
+        <>
+          <div style={rowStyle}>
+            <span style={keyStyle}>Residues</span>
+            <span style={valStyle}>{selectionSummary.count}</span>
+          </div>
+          <div style={rowStyle}>
+            <span style={keyStyle}>Chains</span>
+            <span style={valStyle}>{selectionSummary.chains.join(', ')}</span>
+          </div>
+        </>
+      ) : (
+        <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
+          <span>No residues selected</span>
+        </div>
+      )}
+      {interfaceCount > 0 && (
+        <div style={rowStyle}>
+          <span style={keyStyle}>Interface</span>
+          <span style={valStyle}>{paratope.size} + {epitope.size}</span>
+        </div>
+      )}
+    </div>
+  )
+}

@@ -8,17 +8,18 @@ import { useAntpackStore, CDR_CONFIDENCE_THRESHOLDS, REGION_COLORS, buildCdrSpan
 import type { CdrRegionName, CdrConfidenceFilter, CdrSpan } from '@/stores/antpack-store'
 import { useRmsdStore } from '@/stores/rmsd-store'
 import { useNamedSelectionStore } from '@/stores/named-selection-store'
+import { useIsDark } from '@/hooks/useIsDark'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
-const CELL_W       = 10   // px per residue cell
-const NUM_H        = 11   // px for residue-number annotation row
-const AA_H         = 17   // px for amino-acid cell row
+const CELL_W       = 12   // px per residue cell
+const NUM_H        = 12   // px for residue-number annotation row
+const AA_H         = 18   // px for amino-acid cell row
 const ANNOT_H      = 13   // px for CDR/FW region annotation track
-const ROW_H        = NUM_H + AA_H   // 28 px per wrapped row
-const CHUNK        = 8    // residues per chunk
-const CHUNK_GAP    = 2    // px gap between chunks
+const ROW_H        = NUM_H + AA_H   // px per wrapped row
+const CHUNK        = 10   // residues per chunk
+const CHUNK_GAP    = 8    // px gap between chunks
 const ROW_GAP      = 1    // px gap between wrapped rows
 const MAX_ROWS     = 6    // max visible rows before vertical scroll
 const CONTROLS_W   = 90   // px width of left colour-mode controls
@@ -219,6 +220,7 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
     return map
   }, [allNamedSelections])
 
+  const isDark = useIsDark()
   const [colorMode, setColorMode]       = useState<ColorMode>('chemical')
   const [hoveredKey, setHoveredKey]     = useState<string | null>(null)
   const [anchor, setAnchor]             = useState<Pos | null>(null)
@@ -290,8 +292,8 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
     if (colorMode === 'hydrophobicity') return hydroColor(code)
     if (colorMode === 'plddt')          return plddtColor(residueValues?.get(key))
     if (colorMode === 'rmsd')           return rmsdColor(rmsdDeviations?.get(key))
-    return residueColor(code)
-  }, [colorMode, residueValues, rmsdDeviations])
+    return residueColor(code, isDark)
+  }, [colorMode, residueValues, rmsdDeviations, isDark])
 
   // ── Event handlers ──────────────────────────────────────────────────────────
   function handleCellMouseDown(
@@ -513,41 +515,30 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
                   />
                 )}
 
-                {/* Residue-number annotation line */}
+                {/* Per-group residue-number ruler (label at start of each chunk) */}
                 <div style={{ display: 'flex', height: NUM_H }}>
                   {row.residues.map((res, i) => {
                     const globalIdx  = row.rowStartIdx + i
-                    const showNum    = globalIdx === 0 || res.number % 10 === 0
-                    const isChunkEnd = (globalIdx + 1) % CHUNK === 0 && i < row.residues.length - 1
+                    const isChunkStart = i % CHUNK === 0
+                    const isChunkEnd   = (globalIdx + 1) % CHUNK === 0 && i < row.residues.length - 1
 
                     return (
                       <React.Fragment key={i}>
                         <div style={{ width: CELL_W, height: NUM_H, position: 'relative', flexShrink: 0 }}>
-                          {showNum && (
-                            <>
-                              <span style={{
-                                position: 'absolute',
-                                left: 0,
-                                top: 0,
-                                fontSize: 7,
-                                lineHeight: 1,
-                                fontFamily: 'JetBrains Mono, monospace',
-                                color: 'var(--color-text-disabled)',
-                                whiteSpace: 'nowrap',
-                                pointerEvents: 'none',
-                              }}>
-                                {res.number}
-                              </span>
-                              <div style={{
-                                position: 'absolute',
-                                left: 0,
-                                bottom: 0,
-                                width: 1,
-                                height: 3,
-                                background: 'var(--color-text-disabled)',
-                                opacity: 0.35,
-                              }} />
-                            </>
+                          {isChunkStart && (
+                            <span style={{
+                              position: 'absolute',
+                              left: 0,
+                              top: 0,
+                              fontSize: 9,
+                              lineHeight: 1,
+                              fontFamily: 'JetBrains Mono, monospace',
+                              color: 'var(--color-text-secondary)',
+                              whiteSpace: 'nowrap',
+                              pointerEvents: 'none',
+                            }}>
+                              {res.number}
+                            </span>
                           )}
                         </div>
                         {isChunkEnd && <div style={{ width: CHUNK_GAP, flexShrink: 0 }} />}
@@ -606,9 +597,6 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
                             cursor: 'pointer',
                             transition: isActive ? 'none' : 'background 60ms ease',
                             boxSizing: 'border-box',
-                            borderRight: !isChunkEnd && i < row.residues.length - 1
-                              ? '1px solid rgba(128,128,128,0.14)'
-                              : 'none',
                             borderBottom: isSelected
                               ? '2px solid color-mix(in srgb, var(--color-accent) 80%, #fff)'
                               : namedSelHex

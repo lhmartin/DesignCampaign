@@ -31,25 +31,28 @@ export const HYDROPHOBICITY_SCALE: Record<string, number> = {
 }
 
 // ─── Residue color palette ────────────────────────────────────────────────────
-export function residueColor(code: string): { bg: string; fg: string } {
+// Light-mode fg values are darker so letters keep ≥4.5:1 contrast on the pale
+// tile tint when the surrounding card is white. Dark-mode fg values keep the
+// original "glowing" pastels which pop on the dark card surface.
+export function residueColor(code: string, isDark: boolean = true): { bg: string; fg: string } {
   switch (code) {
     // Hydrophobic (non-polar aliphatic + aromatic)
     case 'A': case 'V': case 'I': case 'L': case 'M':
     case 'F': case 'W': case 'P':
-      return { bg: 'rgba(255,155,60,0.22)', fg: '#ff9e50' }
+      return { bg: 'rgba(255,155,60,0.22)', fg: isDark ? '#ff9e50' : '#7c2d12' }
     // Polar uncharged
     case 'S': case 'T': case 'N': case 'Q': case 'C': case 'Y':
-      return { bg: 'rgba(72,200,110,0.20)', fg: '#52d080' }
+      return { bg: 'rgba(72,200,110,0.20)', fg: isDark ? '#52d080' : '#14532d' }
     // Positively charged
     case 'K': case 'R': case 'H':
-      return { bg: 'rgba(80,140,255,0.20)', fg: '#7aaeff' }
+      return { bg: 'rgba(80,140,255,0.20)', fg: isDark ? '#7aaeff' : '#1e3a8a' }
     // Negatively charged
     case 'D': case 'E':
-      return { bg: 'rgba(255,80,80,0.20)', fg: '#ff7070' }
+      return { bg: 'rgba(255,80,80,0.20)', fg: isDark ? '#ff7070' : '#7f1d1d' }
     // Glycine — flexible
     case 'G':
-      return { bg: 'rgba(160,160,180,0.16)', fg: '#a0a0b8' }
+      return { bg: 'rgba(160,160,180,0.16)', fg: isDark ? '#a0a0b8' : '#374151' }
     default:
-      return { bg: 'rgba(120,120,140,0.12)', fg: '#888898' }
+      return { bg: 'rgba(120,120,140,0.12)', fg: isDark ? '#888898' : '#475569' }
   }
 }
