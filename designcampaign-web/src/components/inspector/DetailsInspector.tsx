@@ -10,19 +10,60 @@ const sectionHeaderStyle: React.CSSProperties = {
   letterSpacing: '0.08em',
   textTransform: 'uppercase',
   color: 'var(--color-text-secondary)',
-  padding: '8px 12px 6px',
+  padding: '14px 14px 8px',
   borderBottom: '1px solid var(--color-border)',
   background: 'var(--color-secondary-bg)',
+  position: 'sticky',
+  top: 0,
+  zIndex: 1,
+}
+
+// First section starts flush against the top of the panel.
+const firstSectionHeaderStyle: React.CSSProperties = {
+  ...sectionHeaderStyle,
+  paddingTop: 10,
 }
 
 const rowStyle: React.CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'baseline',
-  padding: '4px 12px',
+  padding: '5px 14px',
   fontSize: 12,
-  lineHeight: 1.35,
-  gap: 8,
+  lineHeight: 1.4,
+  gap: 10,
+}
+
+const sectionBodyStyle: React.CSSProperties = {
+  padding: '6px 0 10px',
+  display: 'flex',
+  flexDirection: 'column',
+}
+
+const subgroupStyle: React.CSSProperties = {
+  marginTop: 10,
+}
+
+const subgroupHeaderStyle: React.CSSProperties = {
+  padding: '0 14px 4px',
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-secondary)',
+}
+
+const groupRowStyle: React.CSSProperties = {
+  ...rowStyle,
+  paddingLeft: 24,
+}
+
+const prefixCaptionStyle: React.CSSProperties = {
+  padding: '0 14px 4px',
+  fontSize: 10,
+  color: 'var(--color-text-disabled)',
+  fontFamily: 'JetBrains Mono, monospace',
+  wordBreak: 'break-all',
 }
 
 const keyStyle: React.CSSProperties = {
@@ -171,110 +212,107 @@ export function DetailsInspector() {
       overflow: 'auto',
       minHeight: 0,
     }}>
-      <div style={sectionHeaderStyle}>Active file</div>
-      <div style={rowStyle}>
-        <span style={keyStyle}>Name</span>
-        <span style={valStyle} title={getFileName(activeFile)}>{getFileName(activeFile)}</span>
-      </div>
-      <div style={rowStyle}>
-        <span style={keyStyle}>Path</span>
-        <span style={{ ...valStyle, direction: 'rtl' }} title={activeFile}>{activeFile}</span>
-      </div>
-      <div style={rowStyle}>
-        <span style={keyStyle}>Format</span>
-        <span style={valStyle}>{getFileExt(activeFile) || '—'}</span>
+      <div style={firstSectionHeaderStyle}>Active file</div>
+      <div style={sectionBodyStyle}>
+        <div style={rowStyle}>
+          <span style={keyStyle}>Name</span>
+          <span style={valStyle} title={getFileName(activeFile)}>{getFileName(activeFile)}</span>
+        </div>
+        <div style={rowStyle}>
+          <span style={keyStyle}>Path</span>
+          <span style={{ ...valStyle, direction: 'rtl' }} title={activeFile}>{activeFile}</span>
+        </div>
+        <div style={rowStyle}>
+          <span style={keyStyle}>Format</span>
+          <span style={valStyle}>{getFileExt(activeFile) || '—'}</span>
+        </div>
       </div>
 
       <div style={sectionHeaderStyle}>Metrics</div>
-      {(() => {
-        const m = metricsRow?.metrics
-        if (!m) {
-          return (
-            <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
-              <span>No metrics for this file</span>
-            </div>
-          )
-        }
-        const cols = allColumns.filter(c => c in m)
-        const extra = Object.keys(m).filter(k => !allColumns.includes(k))
-        const ordered = [...cols, ...extra]
-        if (ordered.length === 0) {
-          return (
-            <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
-              <span>No metrics for this file</span>
-            </div>
-          )
-        }
-        const { sectionPrefix, groups } = organizeMetrics(ordered)
-        return (
-          <>
-            {sectionPrefix && (
-              <div style={{
-                padding: '4px 12px 6px',
-                fontSize: 10,
-                color: 'var(--color-text-disabled)',
-                fontFamily: 'JetBrains Mono, monospace',
-                wordBreak: 'break-all',
-              }} title={sectionPrefix}>
-                {sectionPrefix}.…
+      <div style={sectionBodyStyle}>
+        {(() => {
+          const m = metricsRow?.metrics
+          if (!m) {
+            return (
+              <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
+                <span>No metrics for this file</span>
               </div>
-            )}
-            {groups.map((g, gi) => g.prefix ? (
-              <div key={gi}>
-                <div style={{
-                  padding: '6px 12px 2px',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  color: 'var(--color-text-secondary)',
-                }}>
-                  {g.prefix}
+            )
+          }
+          const cols = allColumns.filter(c => c in m)
+          const extra = Object.keys(m).filter(k => !allColumns.includes(k))
+          const ordered = [...cols, ...extra]
+          if (ordered.length === 0) {
+            return (
+              <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
+                <span>No metrics for this file</span>
+              </div>
+            )
+          }
+          const { sectionPrefix, groups } = organizeMetrics(ordered)
+          return (
+            <>
+              {sectionPrefix && (
+                <div style={prefixCaptionStyle} title={sectionPrefix}>
+                  {sectionPrefix}.…
                 </div>
-                {g.entries.map(e => (
-                  <div key={e.key} style={{ ...rowStyle, paddingLeft: 20 }}>
-                    <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
-                    <span style={valStyle}>{fmtNum(m[e.key])}</span>
+              )}
+              {groups.map((g, gi) => {
+                const isFirstGroup = gi === 0
+                if (g.prefix) {
+                  return (
+                    <div key={gi} style={isFirstGroup ? undefined : subgroupStyle}>
+                      <div style={subgroupHeaderStyle}>{g.prefix}</div>
+                      {g.entries.map(e => (
+                        <div key={e.key} style={groupRowStyle}>
+                          <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
+                          <span style={valStyle}>{fmtNum(m[e.key])}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                }
+                return (
+                  <div key={gi}>
+                    {g.entries.map(e => (
+                      <div key={e.key} style={rowStyle}>
+                        <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
+                        <span style={valStyle}>{fmtNum(m[e.key])}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div key={gi}>
-                {g.entries.map(e => (
-                  <div key={e.key} style={rowStyle}>
-                    <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
-                    <span style={valStyle}>{fmtNum(m[e.key])}</span>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </>
-        )
-      })()}
+                )
+              })}
+            </>
+          )
+        })()}
+      </div>
 
       <div style={sectionHeaderStyle}>Selection</div>
-      {selectionSummary ? (
-        <>
-          <div style={rowStyle}>
-            <span style={keyStyle}>Residues</span>
-            <span style={valStyle}>{selectionSummary.count}</span>
+      <div style={sectionBodyStyle}>
+        {selectionSummary ? (
+          <>
+            <div style={rowStyle}>
+              <span style={keyStyle}>Residues</span>
+              <span style={valStyle}>{selectionSummary.count}</span>
+            </div>
+            <div style={rowStyle}>
+              <span style={keyStyle}>Chains</span>
+              <span style={valStyle}>{selectionSummary.chains.join(', ')}</span>
+            </div>
+          </>
+        ) : (
+          <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
+            <span>No residues selected</span>
           </div>
+        )}
+        {paratopeSize + epitopeSize > 0 && (
           <div style={rowStyle}>
-            <span style={keyStyle}>Chains</span>
-            <span style={valStyle}>{selectionSummary.chains.join(', ')}</span>
+            <span style={keyStyle}>Interface</span>
+            <span style={valStyle}>{paratopeSize} + {epitopeSize}</span>
           </div>
-        </>
-      ) : (
-        <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
-          <span>No residues selected</span>
-        </div>
-      )}
-      {paratopeSize + epitopeSize > 0 && (
-        <div style={rowStyle}>
-          <span style={keyStyle}>Interface</span>
-          <span style={valStyle}>{paratopeSize} + {epitopeSize}</span>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
