@@ -1,3 +1,4 @@
+import { FolderOpen } from 'lucide-react'
 import { useFileStore } from '@/stores/file-store'
 import { useMetricsStore } from '@/stores/metrics-store'
 import { useSelectionStore } from '@/stores/selection-store'
@@ -16,6 +17,7 @@ const sectionHeaderStyle: React.CSSProperties = {
   position: 'sticky',
   top: 0,
   zIndex: 1,
+  boxShadow: '0 1px 0 var(--color-border)',
 }
 
 // First section starts flush against the top of the panel.
@@ -192,14 +194,22 @@ export function DetailsInspector() {
       <div style={{
         flex: 1,
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 16,
+        gap: 10,
+        padding: 24,
         color: 'var(--color-text-disabled)',
         fontSize: 12,
         textAlign: 'center',
       }}>
-        No file selected
+        <FolderOpen size={28} strokeWidth={1.4} />
+        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-secondary)' }}>
+          No file selected
+        </div>
+        <div style={{ maxWidth: 200, lineHeight: 1.4 }}>
+          Open a file from the left panel to inspect its metrics and selection.
+        </div>
       </div>
     )
   }

@@ -26,7 +26,7 @@ const ResizableHandle = ({
   <Separator
     className={cn(
       // 8px wide hit area — wide enough to grab reliably
-      'relative flex w-2 shrink-0 items-center justify-center',
+      'group relative flex w-2 shrink-0 items-center justify-center',
       'bg-transparent cursor-col-resize',
       // Vertical variant
       'data-[panel-group-direction=vertical]:h-2 data-[panel-group-direction=vertical]:w-full data-[panel-group-direction=vertical]:cursor-row-resize',
@@ -36,6 +36,16 @@ const ResizableHandle = ({
     )}
     {...props}
   >
+    {/* Always-visible divider line: 1px centered in the 8px hit area. */}
+    <div
+      aria-hidden
+      className={cn(
+        'pointer-events-none absolute bg-[var(--color-border)]',
+        // Horizontal handle → vertical 1px line; vertical handle → horizontal 1px line.
+        'left-1/2 top-0 h-full w-px -translate-x-1/2',
+        'group-data-[panel-group-direction=vertical]:left-0 group-data-[panel-group-direction=vertical]:top-1/2 group-data-[panel-group-direction=vertical]:h-px group-data-[panel-group-direction=vertical]:w-full group-data-[panel-group-direction=vertical]:-translate-y-1/2 group-data-[panel-group-direction=vertical]:translate-x-0',
+      )}
+    />
     {withHandle && (
       <div
         className="absolute z-10 flex h-5 w-4 items-center justify-center rounded-sm border border-[var(--color-border)] bg-[var(--color-secondary-bg)]"

@@ -118,12 +118,26 @@ export function AppShell() {
         WebkitAppRegion: 'drag',
       } as React.CSSProperties}>
         <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 7,
           fontFamily: 'Outfit, sans-serif',
           fontWeight: 600,
-          fontSize: 12,
-          letterSpacing: '0.06em',
-          color: 'var(--color-accent)',
+          fontSize: 14,
+          letterSpacing: '0.04em',
+          color: 'var(--color-text-primary)',
         }}>
+          <span
+            aria-hidden
+            style={{
+              width: 9,
+              height: 9,
+              borderRadius: '50%',
+              background: 'var(--color-accent)',
+              boxShadow: '0 0 0 2px var(--color-accent-subtle)',
+              flexShrink: 0,
+            }}
+          />
           DesignCampaign
         </span>
 

@@ -63,9 +63,9 @@
   --color-foreground:       #c4d4ec;
   --color-secondary-bg:     #1c2340;
   --color-border:           #2e3f64;
-  --color-accent:           #00c8a8;
-  --color-accent-hover:     #00b096;
-  --color-accent-subtle:    rgba(0,200,168,0.09);
+  --color-accent:           #4d9eff;
+  --color-accent-hover:     #6fb0ff;
+  --color-accent-subtle:    rgba(77,158,255,0.10);
   --color-text-primary:     #c4d4ec;
   --color-text-secondary:   #7090bb;  /* was #627eaa — 4.3:1 → 5.3:1 contrast */
   --color-text-disabled:    var(--color-text-secondary);  /* raised from #5a7399 — now passes WCAG AA for small text */
@@ -77,7 +77,7 @@
   --color-card-foreground:  #c4d4ec;
   --color-popover:          #1c2340;
   --color-popover-foreground: #c4d4ec;
-  --color-primary:          #00c8a8;
+  --color-primary:          #4d9eff;
   --color-primary-foreground: #0c1120;
   --color-secondary:        #1e2a44;
   --color-secondary-foreground: #c4d4ec;
@@ -86,7 +86,7 @@
   --color-destructive:      #f87171;
   --color-destructive-foreground: #0c1120;
   --color-input:            #2e3f64;
-  --color-ring:             #00c8a8;
+  --color-ring:             #4d9eff;
 
   background-color: var(--color-background);
   color: var(--color-foreground);

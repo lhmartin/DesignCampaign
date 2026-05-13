@@ -22,7 +22,7 @@ const CHUNK        = 10   // residues per chunk
 const CHUNK_GAP    = 8    // px gap between chunks
 const ROW_GAP      = 1    // px gap between wrapped rows
 const MAX_ROWS     = 6    // max visible rows before vertical scroll
-const CONTROLS_W   = 90   // px width of left colour-mode controls
+const CONTROLS_W   = 118  // px width of left colour-mode controls
 const CHAIN_PILL_W = 36   // px width reserved for chain label
 
 // ─── Color mode ───────────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ function Swatch({ bg, label }: { bg: string; label: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <div style={{ width: 9, height: 9, borderRadius: 2, background: bg, flexShrink: 0, border: '1px solid rgba(128,128,128,0.15)' }} />
-      <span style={{ fontSize: 9.5, color: 'var(--color-text-secondary)', lineHeight: 1, whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)', lineHeight: 1, whiteSpace: 'nowrap' }}>{label}</span>
     </div>
   )
 }
@@ -117,8 +117,8 @@ function ColorLegend({ mode }: { mode: ColorMode }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
       <div style={{ height: 9, borderRadius: 2, background: 'linear-gradient(to right, #3b82f6, #f97316)' }} />
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Philic</span>
-        <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Phobic</span>
+        <span style={{ fontSize: 9.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Philic</span>
+        <span style={{ fontSize: 9.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>Phobic</span>
       </div>
     </div>
   )
@@ -127,8 +127,8 @@ function ColorLegend({ mode }: { mode: ColorMode }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 5 }}>
       <div style={{ height: 9, borderRadius: 2, background: 'linear-gradient(to right, rgba(255,255,255,0.25), #f97316, #ef4444)' }} />
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>0 Å</span>
-        <span style={{ fontSize: 8.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>≥3 Å</span>
+        <span style={{ fontSize: 9.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>0 Å</span>
+        <span style={{ fontSize: 9.5, color: 'var(--color-text-secondary)', lineHeight: 1 }}>≥3 Å</span>
       </div>
     </div>
   )
@@ -378,10 +378,10 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
           value={colorMode}
           onChange={e => setColorMode(e.target.value as ColorMode)}
           style={{
-            fontSize: 9,
+            fontSize: 10,
             fontFamily: 'Outfit, sans-serif',
             fontWeight: 600,
-            padding: '2px 3px',
+            padding: '3px 5px',
             borderRadius: 4,
             border: '1px solid var(--color-border)',
             background: 'var(--color-background)',
@@ -404,7 +404,7 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
         {/* CDR confidence filter — only shown when annotations are present */}
         {cdrAnnotations && cdrAnnotations.length > 0 && (
           <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <span style={{ fontSize: 8.5, color: 'var(--color-text-disabled)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 9.5, color: 'var(--color-text-secondary)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
               CDR conf.
             </span>
             <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
@@ -414,10 +414,10 @@ export function SequenceViewer({ chains, plugin, residueValues, structurePath }:
                   onClick={() => setCdrConfidenceFilter(opt)}
                   style={{
                     flex: 1,
-                    fontSize: 8,
+                    fontSize: 9,
                     fontFamily: 'Outfit, sans-serif',
                     fontWeight: 600,
-                    padding: '2px 0',
+                    padding: '3px 0',
                     border: 'none',
                     borderLeft: i > 0 ? '1px solid var(--color-border)' : 'none',
                     cursor: 'pointer',
