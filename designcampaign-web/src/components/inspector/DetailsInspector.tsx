@@ -250,6 +250,8 @@ export function DetailsInspector() {
             )
           }
           const { sectionPrefix, groups } = organizeMetrics(ordered)
+          let rowIdx = 0
+          const stripe = () => (rowIdx++ % 2 === 1 ? { background: 'var(--color-table-alt-row)' } : null)
           return (
             <>
               {sectionPrefix && (
@@ -264,7 +266,7 @@ export function DetailsInspector() {
                     <div key={gi} style={isFirstGroup ? undefined : subgroupStyle}>
                       <div style={subgroupHeaderStyle}>{g.prefix}</div>
                       {g.entries.map(e => (
-                        <div key={e.key} style={groupRowStyle}>
+                        <div key={e.key} style={{ ...groupRowStyle, ...stripe() }}>
                           <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
                           <span style={valStyle}>{fmtNum(m[e.key])}</span>
                         </div>
@@ -275,7 +277,7 @@ export function DetailsInspector() {
                 return (
                   <div key={gi}>
                     {g.entries.map(e => (
-                      <div key={e.key} style={rowStyle}>
+                      <div key={e.key} style={{ ...rowStyle, ...stripe() }}>
                         <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
                         <span style={valStyle}>{fmtNum(m[e.key])}</span>
                       </div>
