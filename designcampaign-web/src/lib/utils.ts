@@ -28,6 +28,13 @@ export function getFileStem(filePath: string): string {
   return getFileName(filePath).replace(/\.[^.]+$/, '')
 }
 
+/** Extract filename extension (without the dot), uppercased. Returns '' if none. */
+export function getFileExt(filePath: string): string {
+  const name = getFileName(filePath)
+  const m = /\.([^.]+)$/.exec(name)
+  return m ? m[1].toUpperCase() : ''
+}
+
 /** Trigger a browser download for a string payload. */
 export function downloadBlob(content: string, filename: string, mimeType = 'text/plain'): void {
   const blob = new Blob([content], { type: mimeType })

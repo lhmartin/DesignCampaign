@@ -15,7 +15,6 @@ import { UniProtPanel } from '@/components/metrics/UniProtPanel'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { MarimoTab } from '@/components/notebook/MarimoTab'
 import { DetailsInspector } from '@/components/inspector/DetailsInspector'
-import { readViewerBg } from '@/components/viewer/viewer-bg'
 import { useFileStore } from '@/stores/file-store'
 import { useViewerPrefsStore } from '@/stores/viewer-prefs-store'
 import { useUIStore } from '@/stores/ui-store'
@@ -67,9 +66,7 @@ export function AppShell() {
       ? { color: '#1c2340', symbolColor: '#c4d4ec' }
       : { color: '#ffffff', symbolColor: '#111827' }
     )
-    // Push the new --color-viewer-bg into the Mol* canvas so it blends with the card.
-    const plugin = viewerRef.current?.getPlugin() as { canvas3d?: { setProps: (p: unknown) => void } } | null
-    try { plugin?.canvas3d?.setProps({ renderer: { backgroundColor: readViewerBg() } }) } catch { /* best effort */ }
+    viewerRef.current?.refreshBackground()
   }, [isDark])
 
   useEffect(() => {

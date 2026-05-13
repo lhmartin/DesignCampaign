@@ -37,6 +37,8 @@ export interface MolstarViewerHandle {
   loadFromFile: (filePath: string) => Promise<void>
   loadAsComparison: (filePath: string) => Promise<void>
   getPlugin: () => PluginUIContext | null
+  /** Re-read --color-viewer-bg and push it into the canvas. Call after theme toggles. */
+  refreshBackground: () => void
 }
 
 interface MolstarViewerProps {
@@ -626,6 +628,14 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
       return () => { sub.unsubscribe(); clearTimeout(timer) }
     }, [plugin])
 
+    // 'dark' follows the theme via --color-viewer-bg so the canvas blends with the
+    // surrounding card; 'light' is an explicit white override.
+    const applyCanvasBg = useCallback(() => {
+      if (!plugin?.canvas3d) return
+      const bg = viewerBg === 'dark' ? readViewerBg() : 0xffffff
+      try { (plugin.canvas3d as any).setProps({ renderer: { backgroundColor: bg } }) } catch { /* best effort */ }
+    }, [plugin, viewerBg])
+
     useImperativeHandle(ref, () => ({
       loadFromFile: async (filePath: string) => {
         if (!plugin) { onError?.('Mol* viewer not initialized'); return }
@@ -655,7 +665,8 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
         }
       },
       getPlugin: () => plugin,
-    }), [plugin, colorScheme, onStructureLoaded, onError, setIsLoading, resetViewerState])
+      refreshBackground: applyCanvasBg,
+    }), [plugin, colorScheme, applyCanvasBg, onStructureLoaded, onError, setIsLoading, resetViewerState])
 
     useEffect(() => {
       if (!plugin) return
@@ -714,13 +725,7 @@ export const MolstarViewer = forwardRef<MolstarViewerHandle, MolstarViewerProps>
       try { (plugin.canvas3d as any).setProps({ camera: { mode: cameraMode } }) } catch { /* best effort */ }
     }, [plugin, cameraMode])
 
-    useEffect(() => {
-      if (!plugin?.canvas3d) return
-      // 'dark' follows the theme via --color-viewer-bg so the canvas blends with the
-      // surrounding card; 'light' is an explicit white override.
-      const bg = viewerBg === 'dark' ? readViewerBg() : 0xffffff
-      try { (plugin.canvas3d as any).setProps({ renderer: { backgroundColor: bg } }) } catch { /* best effort */ }
-    }, [plugin, viewerBg])
+    useEffect(() => { applyCanvasBg() }, [applyCanvasBg])
 
     useEffect(() => {
       if (!plugin?.canvas3d) return

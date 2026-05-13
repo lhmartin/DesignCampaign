@@ -39,7 +39,6 @@ export function useMolstar(containerRef: RefObject<HTMLDivElement | null>) {
             },
             canvas3d: {
               renderer: {
-                // Follows --color-viewer-bg so the canvas blends with the card surface in both themes.
                 backgroundColor: readViewerBg() as unknown as import('molstar/lib/mol-util/color').Color,
               },
             },

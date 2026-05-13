@@ -31,10 +31,9 @@ export const HYDROPHOBICITY_SCALE: Record<string, number> = {
 }
 
 // ─── Residue color palette ────────────────────────────────────────────────────
-// Light-mode fg values are darker so letters keep ≥4.5:1 contrast on the pale
-// tile tint when the surrounding card is white. Dark-mode fg values keep the
-// original "glowing" pastels which pop on the dark card surface.
-export function residueColor(code: string, isDark: boolean = true): { bg: string; fg: string } {
+// Light-mode fg values must stay ≥4.5:1 on the pale tile tint when the
+// surrounding card is white; dark-mode keeps the brighter pastels.
+export function residueColor(code: string, isDark: boolean): { bg: string; fg: string } {
   switch (code) {
     // Hydrophobic (non-polar aliphatic + aromatic)
     case 'A': case 'V': case 'I': case 'L': case 'M':

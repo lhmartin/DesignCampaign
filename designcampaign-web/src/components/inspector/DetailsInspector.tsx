@@ -1,9 +1,8 @@
-import { useMemo } from 'react'
 import { useFileStore } from '@/stores/file-store'
 import { useMetricsStore } from '@/stores/metrics-store'
 import { useSelectionStore } from '@/stores/selection-store'
 import { useInterfaceStore } from '@/stores/interface-store'
-import { getFileName, getFileStem } from '@/lib/utils'
+import { getFileName, getFileStem, getFileExt } from '@/lib/utils'
 
 const sectionHeaderStyle: React.CSSProperties = {
   fontSize: 10,
@@ -49,37 +48,27 @@ function fmtNum(v: number | undefined): string {
   return v.toFixed(2)
 }
 
-function fileExt(path: string): string {
-  const m = /\.([^.\\/]+)$/.exec(path)
-  return m ? m[1].toUpperCase() : '—'
-}
-
 export function DetailsInspector() {
   const activeFile = useFileStore(s => s.activeFile)
-  const rows = useMetricsStore(s => s.rows)
-  const selectedResidues = useSelectionStore(s => s.selectedResidues)
-  const paratope = useInterfaceStore(s => s.paratope)
-  const epitope = useInterfaceStore(s => s.epitope)
-
-  const metricsRow = useMemo(() => {
+  // Narrow the metrics selector so unrelated row updates don't re-render the inspector.
+  const metricsRow = useMetricsStore(s => {
     if (!activeFile) return undefined
     const stem = getFileStem(activeFile)
-    return rows.find(r => r.filePath === activeFile)
-      ?? rows.find(r => r.name === stem)
-  }, [rows, activeFile])
+    return s.rows.find(r => r.filePath === activeFile) ?? s.rows.find(r => r.name === stem)
+  })
+  const selectedResidues = useSelectionStore(s => s.selectedResidues)
+  const paratopeSize = useInterfaceStore(s => s.paratope.size)
+  const epitopeSize  = useInterfaceStore(s => s.epitope.size)
 
-  const selectionSummary = useMemo(() => {
-    if (selectedResidues.size === 0) return null
+  let selectionSummary: { count: number; chains: string[] } | null = null
+  if (selectedResidues.size > 0) {
     const chains = new Set<string>()
     for (const k of selectedResidues) {
       const c = k.split(':')[0]
       if (c) chains.add(c)
     }
-    return {
-      count: selectedResidues.size,
-      chains: Array.from(chains).sort(),
-    }
-  }, [selectedResidues])
+    selectionSummary = { count: selectedResidues.size, chains: Array.from(chains).sort() }
+  }
 
   if (!activeFile) {
     return (
@@ -97,8 +86,6 @@ export function DetailsInspector() {
       </div>
     )
   }
-
-  const interfaceCount = paratope.size + epitope.size
 
   return (
     <div style={{
@@ -119,7 +106,7 @@ export function DetailsInspector() {
       </div>
       <div style={rowStyle}>
         <span style={keyStyle}>Format</span>
-        <span style={valStyle}>{fileExt(activeFile)}</span>
+        <span style={valStyle}>{getFileExt(activeFile) || '—'}</span>
       </div>
 
       <div style={sectionHeaderStyle}>Metrics</div>
@@ -147,10 +134,10 @@ export function DetailsInspector() {
           <span>No residues selected</span>
         </div>
       )}
-      {interfaceCount > 0 && (
+      {paratopeSize + epitopeSize > 0 && (
         <div style={rowStyle}>
           <span style={keyStyle}>Interface</span>
-          <span style={valStyle}>{paratope.size} + {epitope.size}</span>
+          <span style={valStyle}>{paratopeSize} + {epitopeSize}</span>
         </div>
       )}
     </div>
