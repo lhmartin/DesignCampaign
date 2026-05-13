@@ -204,7 +204,7 @@ interface SequenceViewerProps {
 // ─── Component ───────────────────────────────────────────────────────────────
 export function SequenceViewer({ chains, plugin, residueValues, structurePath }: SequenceViewerProps) {
   const { selectedResidues, addResidue, clearSelection, selectAll } = useSelectionStore()
-  const cdrAnnotations         = useAntpackStore(s => structurePath ? s.annotations.get(structurePath) : undefined)
+  const cdrAnnotations         = useAntpackStore(s => structurePath ? s.annotationsByPath.get(structurePath) : undefined)
   const cdrConfidenceFilter    = useAntpackStore(s => s.cdrConfidenceFilter)
   const setCdrConfidenceFilter = useAntpackStore(s => s.setCdrConfidenceFilter)
   const rmsdDeviations         = useRmsdStore(s => structurePath ? s.deviationsByPath.get(structurePath) : undefined)

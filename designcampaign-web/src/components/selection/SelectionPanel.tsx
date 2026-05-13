@@ -118,7 +118,7 @@ function SaveEpitopeSection({ selectedResidues }: { selectedResidues: Set<Select
   const [selectedChain, setChain] = useState<string | null>(null)
   const [saving, setSaving]       = useState(false)
   const activeFile  = useFileStore(s => s.activeFile)
-  const chainSeqs   = useSequenceStore(s => activeFile ? s.sequences.get(activeFile) : null) ?? null
+  const chainSeqs   = useSequenceStore(s => activeFile ? s.sequencesByPath.get(activeFile) : null) ?? null
   const { save }    = useNamedSelectionStore()
 
   const byChain = useMemo(() => groupByChain(selectedResidues), [selectedResidues])
