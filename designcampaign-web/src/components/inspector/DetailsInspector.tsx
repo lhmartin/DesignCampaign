@@ -1,0 +1,330 @@
+import { FolderOpen } from 'lucide-react'
+import { useFileStore } from '@/stores/file-store'
+import { useMetricsStore } from '@/stores/metrics-store'
+import { useSelectionStore } from '@/stores/selection-store'
+import { useInterfaceStore } from '@/stores/interface-store'
+import { getFileName, getFileStem, getFileExt } from '@/lib/utils'
+
+const sectionHeaderStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-secondary)',
+  padding: '14px 14px 8px',
+  borderBottom: '1px solid var(--color-border)',
+  background: 'var(--color-secondary-bg)',
+  position: 'sticky',
+  top: 0,
+  zIndex: 1,
+  boxShadow: '0 1px 0 var(--color-border)',
+}
+
+// First section starts flush against the top of the panel.
+const firstSectionHeaderStyle: React.CSSProperties = {
+  ...sectionHeaderStyle,
+  paddingTop: 10,
+}
+
+const rowStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'baseline',
+  padding: '5px 14px',
+  fontSize: 12,
+  lineHeight: 1.4,
+  gap: 10,
+}
+
+const sectionBodyStyle: React.CSSProperties = {
+  padding: '6px 0 10px',
+  display: 'flex',
+  flexDirection: 'column',
+}
+
+const subgroupStyle: React.CSSProperties = {
+  marginTop: 10,
+}
+
+const subgroupHeaderStyle: React.CSSProperties = {
+  padding: '0 14px 4px',
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-secondary)',
+}
+
+const groupRowStyle: React.CSSProperties = {
+  ...rowStyle,
+  paddingLeft: 24,
+}
+
+const prefixCaptionStyle: React.CSSProperties = {
+  padding: '0 14px 4px',
+  fontSize: 10,
+  color: 'var(--color-text-disabled)',
+  fontFamily: 'JetBrains Mono, monospace',
+  wordBreak: 'break-all',
+}
+
+const keyStyle: React.CSSProperties = {
+  color: 'var(--color-text-secondary)',
+  whiteSpace: 'nowrap',
+}
+
+const valStyle: React.CSSProperties = {
+  fontFamily: 'JetBrains Mono, monospace',
+  color: 'var(--color-text-primary)',
+  textAlign: 'right',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  maxWidth: '60%',
+}
+
+function fmtNum(v: number | undefined): string {
+  if (v === undefined || Number.isNaN(v)) return '—'
+  if (Number.isInteger(v)) return v.toString()
+  return v.toFixed(2)
+}
+
+// ── Metric name organization ────────────────────────────────────────────────
+// Real-world metric keys often share long prefixes (e.g. dotted JSON paths
+// like `payload.job_status.response_payload.*`). organizeMetrics() strips the
+// longest common prefix shared by all keys, then sub-groups remaining names
+// by their leading token when 2+ share one.
+
+type MetricEntry = { key: string; label: string }
+type MetricGroup = { prefix: string | null; entries: MetricEntry[] }
+
+function stringLcp(strs: string[]): string {
+  if (strs.length === 0) return ''
+  let lcp = strs[0]
+  for (let i = 1; i < strs.length; i++) {
+    while (!strs[i].startsWith(lcp)) {
+      lcp = lcp.slice(0, -1)
+      if (!lcp) return ''
+    }
+  }
+  return lcp
+}
+
+// Trim a prefix back to its last '.' or '_' (inclusive) so we don't cut a token.
+function trimToSeparator(s: string): string {
+  const at = Math.max(s.lastIndexOf('.'), s.lastIndexOf('_'))
+  return at === -1 ? '' : s.slice(0, at + 1)
+}
+
+function safeCommonPrefix(keys: string[]): string {
+  const lcp = trimToSeparator(stringLcp(keys))
+  return lcp && keys.every(k => k.length > lcp.length) ? lcp : ''
+}
+
+export function organizeMetrics(keys: string[]): { sectionPrefix: string; groups: MetricGroup[] } {
+  if (keys.length === 0) return { sectionPrefix: '', groups: [] }
+  if (keys.length === 1) {
+    return { sectionPrefix: '', groups: [{ prefix: null, entries: [{ key: keys[0], label: keys[0] }] }] }
+  }
+
+  const sectionPrefix = safeCommonPrefix(keys)
+  const stripped = keys.map(k => k.slice(sectionPrefix.length))
+
+  const order: string[] = []
+  const buckets = new Map<string, number[]>()
+  stripped.forEach((s, i) => {
+    const head = /^([^._]+)/.exec(s)?.[1] ?? ''
+    if (!buckets.has(head)) {
+      buckets.set(head, [])
+      order.push(head)
+    }
+    buckets.get(head)!.push(i)
+  })
+
+  const groups: MetricGroup[] = []
+  for (const head of order) {
+    const idxs = buckets.get(head)!
+    if (idxs.length < 2) {
+      const i = idxs[0]
+      groups.push({ prefix: null, entries: [{ key: keys[i], label: stripped[i] }] })
+      continue
+    }
+    const subNames = idxs.map(i => stripped[i])
+    const subPrefix = safeCommonPrefix(subNames)
+    if (subPrefix) {
+      groups.push({
+        prefix: subPrefix.replace(/[._]$/, ''),
+        entries: idxs.map((i, j) => ({ key: keys[i], label: subNames[j].slice(subPrefix.length) })),
+      })
+    } else {
+      for (let j = 0; j < idxs.length; j++) {
+        groups.push({ prefix: null, entries: [{ key: keys[idxs[j]], label: subNames[j] }] })
+      }
+    }
+  }
+  return { sectionPrefix: sectionPrefix.replace(/[._]$/, ''), groups }
+}
+
+export function DetailsInspector() {
+  const activeFile = useFileStore(s => s.activeFile)
+  // Narrow the metrics selector so unrelated row updates don't re-render the inspector.
+  const metricsRow = useMetricsStore(s => {
+    if (!activeFile) return undefined
+    const stem = getFileStem(activeFile)
+    return s.rows.find(r => r.filePath === activeFile) ?? s.rows.find(r => r.name === stem)
+  })
+  // Use the store's column order so the inspector matches the metrics table.
+  const allColumns = useMetricsStore(s => s.allColumns)
+  const selectedResidues = useSelectionStore(s => s.selectedResidues)
+  const paratopeSize = useInterfaceStore(s => s.paratope.size)
+  const epitopeSize  = useInterfaceStore(s => s.epitope.size)
+
+  let selectionSummary: { count: number; chains: string[] } | null = null
+  if (selectedResidues.size > 0) {
+    const chains = new Set<string>()
+    for (const k of selectedResidues) {
+      const c = k.split(':')[0]
+      if (c) chains.add(c)
+    }
+    selectionSummary = { count: selectedResidues.size, chains: Array.from(chains).sort() }
+  }
+
+  if (!activeFile) {
+    return (
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        padding: 24,
+        color: 'var(--color-text-disabled)',
+        fontSize: 12,
+        textAlign: 'center',
+      }}>
+        <FolderOpen size={28} strokeWidth={1.4} />
+        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-secondary)' }}>
+          No file selected
+        </div>
+        <div style={{ maxWidth: 200, lineHeight: 1.4 }}>
+          Open a file from the left panel to inspect its metrics and selection.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'auto',
+      minHeight: 0,
+    }}>
+      <div style={firstSectionHeaderStyle}>Active file</div>
+      <div style={sectionBodyStyle}>
+        <div style={rowStyle}>
+          <span style={keyStyle}>Name</span>
+          <span style={valStyle} title={getFileName(activeFile)}>{getFileName(activeFile)}</span>
+        </div>
+        <div style={rowStyle}>
+          <span style={keyStyle}>Path</span>
+          <span style={{ ...valStyle, direction: 'rtl' }} title={activeFile}>{activeFile}</span>
+        </div>
+        <div style={rowStyle}>
+          <span style={keyStyle}>Format</span>
+          <span style={valStyle}>{getFileExt(activeFile) || '—'}</span>
+        </div>
+      </div>
+
+      <div style={sectionHeaderStyle}>Metrics</div>
+      <div style={sectionBodyStyle}>
+        {(() => {
+          const m = metricsRow?.metrics
+          if (!m) {
+            return (
+              <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
+                <span>No metrics for this file</span>
+              </div>
+            )
+          }
+          const cols = allColumns.filter(c => c in m)
+          const extra = Object.keys(m).filter(k => !allColumns.includes(k))
+          const ordered = [...cols, ...extra]
+          if (ordered.length === 0) {
+            return (
+              <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
+                <span>No metrics for this file</span>
+              </div>
+            )
+          }
+          const { sectionPrefix, groups } = organizeMetrics(ordered)
+          let rowIdx = 0
+          const stripe = () => (rowIdx++ % 2 === 1 ? { background: 'var(--color-table-alt-row)' } : null)
+          return (
+            <>
+              {sectionPrefix && (
+                <div style={prefixCaptionStyle} title={sectionPrefix}>
+                  {sectionPrefix}.…
+                </div>
+              )}
+              {groups.map((g, gi) => {
+                const isFirstGroup = gi === 0
+                if (g.prefix) {
+                  return (
+                    <div key={gi} style={isFirstGroup ? undefined : subgroupStyle}>
+                      <div style={subgroupHeaderStyle}>{g.prefix}</div>
+                      {g.entries.map(e => (
+                        <div key={e.key} style={{ ...groupRowStyle, ...stripe() }}>
+                          <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
+                          <span style={valStyle}>{fmtNum(m[e.key])}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                }
+                return (
+                  <div key={gi}>
+                    {g.entries.map(e => (
+                      <div key={e.key} style={{ ...rowStyle, ...stripe() }}>
+                        <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
+                        <span style={valStyle}>{fmtNum(m[e.key])}</span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
+            </>
+          )
+        })()}
+      </div>
+
+      <div style={sectionHeaderStyle}>Selection</div>
+      <div style={sectionBodyStyle}>
+        {selectionSummary ? (
+          <>
+            <div style={rowStyle}>
+              <span style={keyStyle}>Residues</span>
+              <span style={valStyle}>{selectionSummary.count}</span>
+            </div>
+            <div style={rowStyle}>
+              <span style={keyStyle}>Chains</span>
+              <span style={valStyle}>{selectionSummary.chains.join(', ')}</span>
+            </div>
+          </>
+        ) : (
+          <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
+            <span>No residues selected</span>
+          </div>
+        )}
+        {paratopeSize + epitopeSize > 0 && (
+          <div style={rowStyle}>
+            <span style={keyStyle}>Interface</span>
+            <span style={valStyle}>{paratopeSize} + {epitopeSize}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

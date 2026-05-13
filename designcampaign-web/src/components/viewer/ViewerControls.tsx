@@ -36,7 +36,7 @@ function Divider() {
       width: 1,
       height: 18,
       background: 'var(--color-border)',
-      margin: '0 4px',
+      margin: '0 8px',
       flexShrink: 0,
     }} />
   )
@@ -184,9 +184,9 @@ export function ViewerControls({
     <div style={{
       display: 'flex',
       alignItems: 'center',
-      gap: 6,
-      padding: '0 10px',
-      height: 38,
+      gap: 10,
+      padding: '0 14px',
+      height: 42,
       flexShrink: 0,
       background: 'var(--color-secondary-bg)',
       borderBottom: '1px solid var(--color-border)',

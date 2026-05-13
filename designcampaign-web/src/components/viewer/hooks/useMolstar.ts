@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
+import { readViewerBg } from '../viewer-bg'
 
 type PluginUIContext = import('molstar/lib/mol-plugin-ui/context').PluginUIContext
 
@@ -38,8 +39,7 @@ export function useMolstar(containerRef: RefObject<HTMLDivElement | null>) {
             },
             canvas3d: {
               renderer: {
-                // Deep navy-black: matches dark theme viewer bg
-                backgroundColor: 0x040812 as unknown as import('molstar/lib/mol-util/color').Color,
+                backgroundColor: readViewerBg() as unknown as import('molstar/lib/mol-util/color').Color,
               },
             },
           },
