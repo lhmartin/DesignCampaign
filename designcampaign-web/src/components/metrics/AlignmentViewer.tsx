@@ -252,7 +252,7 @@ interface AlignmentViewerProps {
 export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
   const { rows, filterText } = useMetricsStore()
   const { rules: filterRules }           = useFilterStore()
-  const { sequences }                    = useSequenceStore()
+  const { sequencesByPath }              = useSequenceStore()
   const { files, setActiveFile }         = useFileStore()
   const isDark                           = useIsDark()
   const [colorMode, setColorMode]        = useState<ColorMode>('chemical')
@@ -265,13 +265,13 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
   // (the shared target scores high; the unique binder scores 1), then per structure
   // pick the chain with the lowest count (= most likely binder).
   const { aligned, names, conservation, filePaths, binderChainIds } = useMemo(() => {
-    const seqCounts = buildSeqCounts(activeRows, sequences)
+    const seqCounts = buildSeqCounts(activeRows, sequencesByPath)
     const nameList:     string[] = []
     const seqList:      string[] = []
     const filePathList: string[] = []
     const chainIdList:  string[] = []
     for (const row of activeRows) {
-      const chains = sequences.get(row.filePath ?? row.name) ?? sequences.get(row.name)
+      const chains = sequencesByPath.get(row.filePath ?? row.name)
       if (!chains?.length) continue
       const result = pickBinderChain(chains, seqCounts)
       if (!result) continue
@@ -284,11 +284,11 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
     const al   = starAlign(seqList)
     const cons = columnConservation(al)
     return { aligned: al, names: nameList, conservation: cons, filePaths: filePathList, binderChainIds: chainIdList }
-  }, [activeRows, sequences])
+  }, [activeRows, sequencesByPath])
 
   // Stable fallback: when CDR track is off, selectors return these so Zustand
   // won't re-render AlignmentViewer on annotation changes.
-  const annotations         = useAntpackStore(s => showCdrTrack ? s.annotations : EMPTY_ANNOTATIONS)
+  const annotations         = useAntpackStore(s => showCdrTrack ? s.annotationsByPath : EMPTY_ANNOTATIONS)
   const cdrConfidenceFilter = useAntpackStore(s => showCdrTrack ? s.cdrConfidenceFilter : 'all')
 
   const cdrTrack = useMemo((): (CdrRegionName | null)[] => {
@@ -335,7 +335,7 @@ export function AlignmentViewer({ viewerRef }: AlignmentViewerProps = {}) {
   const emptyReason =
     rows.length === 0
       ? 'no-metrics'
-      : sequences.size === 0
+      : sequencesByPath.size === 0
         ? 'no-sequences'
         : 'too-few'
 

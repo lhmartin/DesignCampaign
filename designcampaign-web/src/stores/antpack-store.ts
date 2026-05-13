@@ -79,11 +79,11 @@ export function buildCdrSpans(assignments: (CdrRegionName | null)[]): CdrSpan[] 
 
 interface AntPackStore {
   /** Map from structure file path → per-chain annotations */
-  annotations: Map<string, ChainCdrAnnotation[]>
+  annotationsByPath: Map<string, ChainCdrAnnotation[]>
   /** Set of file paths currently being annotated */
-  running: Set<string>
+  runningPaths: Set<string>
   /** Map from file path → error message */
-  errors: Map<string, string>
+  errorsByPath: Map<string, string>
   /**
    * Only render CDR annotation tracks for chains whose AntPack percent identity
    * meets this threshold. 'all' = no filter; 'medium' = ≥40%; 'high' = ≥70%.
@@ -129,18 +129,18 @@ function computeCdrMetrics(annotations: ChainCdrAnnotation[]): Record<string, nu
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 export const useAntpackStore = create<AntPackStore>((set, get) => ({
-  annotations:          new Map(),
-  running:              new Set(),
-  errors:               new Map(),
+  annotationsByPath:    new Map(),
+  runningPaths:         new Set(),
+  errorsByPath:         new Map(),
   cdrConfidenceFilter:  'all',
   setCdrConfidenceFilter: (filter) => set({ cdrConfidenceFilter: filter }),
 
   async annotate(filePath, chains, scheme = 'imgt') {
-    if (get().running.has(filePath)) return
+    if (get().runningPaths.has(filePath)) return
 
     set(s => ({
-      running: new Set([...s.running, filePath]),
-      errors:  new Map([...s.errors].filter(([k]) => k !== filePath)),
+      runningPaths: new Set([...s.runningPaths, filePath]),
+      errorsByPath: new Map([...s.errorsByPath].filter(([k]) => k !== filePath)),
     }))
 
     try {
@@ -168,20 +168,20 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
       useMetricsStore.getState().batchInjectResults([{ filePath, name: rowName, metrics: computeCdrMetrics(chainAnnotations) }])
 
       set(s => {
-        const next = new Map(s.annotations)
+        const next = new Map(s.annotationsByPath)
         next.set(filePath, chainAnnotations)
-        const running = new Set(s.running)
-        running.delete(filePath)
-        return { annotations: next, running }
+        const runningPaths = new Set(s.runningPaths)
+        runningPaths.delete(filePath)
+        return { annotationsByPath: next, runningPaths }
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       set(s => {
-        const running = new Set(s.running)
-        running.delete(filePath)
+        const runningPaths = new Set(s.runningPaths)
+        runningPaths.delete(filePath)
         return {
-          running,
-          errors: new Map([...s.errors, [filePath, msg]]),
+          runningPaths,
+          errorsByPath: new Map([...s.errorsByPath, [filePath, msg]]),
         }
       })
     }
@@ -189,7 +189,7 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
 
   async annotateAll(scheme = 'imgt') {
     const rows      = useMetricsStore.getState().rows
-    const sequences = useSequenceStore.getState().sequences
+    const sequences = useSequenceStore.getState().sequencesByPath
 
     // Build filePath→rowName lookup once (O(M)) to avoid repeated rows.find() later.
     const rowNameByPath = new Map(rows.filter(r => r.filePath).map(r => [r.filePath!, r.name]))
@@ -213,8 +213,8 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
     const filePaths    = [...filePathSet]
 
     set(s => ({
-      running: new Set([...s.running, ...filePaths]),
-      errors:  new Map([...s.errors].filter(([k]) => !filePathSet.has(k))),
+      runningPaths: new Set([...s.runningPaths, ...filePaths]),
+      errorsByPath: new Map([...s.errorsByPath].filter(([k]) => !filePathSet.has(k))),
     }))
 
     try {
@@ -247,18 +247,18 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
       useMetricsStore.getState().batchInjectResults(injectBatch)
 
       set(s => {
-        const next    = new Map(s.annotations)
-        const running = new Set(s.running)
+        const next         = new Map(s.annotationsByPath)
+        const runningPaths = new Set(s.runningPaths)
         for (const [fp, anns] of annotationsByPath) next.set(fp, anns)
-        for (const fp of filePaths) running.delete(fp)
-        return { annotations: next, running }
+        for (const fp of filePaths) runningPaths.delete(fp)
+        return { annotationsByPath: next, runningPaths }
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       set(s => {
-        const running = new Set(s.running)
-        for (const fp of filePaths) running.delete(fp)
-        return { running, errors: new Map([...s.errors, ...filePaths.map(fp => [fp, msg] as [string, string])]) }
+        const runningPaths = new Set(s.runningPaths)
+        for (const fp of filePaths) runningPaths.delete(fp)
+        return { runningPaths, errorsByPath: new Map([...s.errorsByPath, ...filePaths.map(fp => [fp, msg] as [string, string])]) }
       })
     }
 
@@ -267,11 +267,11 @@ export const useAntpackStore = create<AntPackStore>((set, get) => ({
 
   clearAnnotations(filePath) {
     set(s => {
-      const next    = new Map(s.annotations)
-      const errors  = new Map(s.errors)
+      const next         = new Map(s.annotationsByPath)
+      const errorsByPath = new Map(s.errorsByPath)
       next.delete(filePath)
-      errors.delete(filePath)
-      return { annotations: next, errors }
+      errorsByPath.delete(filePath)
+      return { annotationsByPath: next, errorsByPath }
     })
   },
 }))

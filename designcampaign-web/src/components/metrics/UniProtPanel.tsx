@@ -157,7 +157,7 @@ export function UniProtPanel() {
   const seqCopiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const activeFile   = useFileStore(s => s.activeFile)
-  const activeChains = useSequenceStore(s => activeFile ? s.sequences.get(activeFile) : null) ?? null
+  const activeChains = useSequenceStore(s => activeFile ? s.sequencesByPath.get(activeFile) : null) ?? null
 
   // Auto-copy first chain sequence to clipboard when structure changes
   useEffect(() => {

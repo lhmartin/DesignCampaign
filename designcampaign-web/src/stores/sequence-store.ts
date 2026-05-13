@@ -7,29 +7,29 @@ export interface ChainSeq {
 
 interface SequenceStore {
   /** Sequences for all loaded structures, keyed by file path (matches ProteinMetrics.filePath). */
-  sequences: Map<string, ChainSeq[]>
-  setSequences: (name: string, chains: ChainSeq[]) => void
+  sequencesByPath: Map<string, ChainSeq[]>
+  setSequences: (filePath: string, chains: ChainSeq[]) => void
   /** Merge a batch of sequences in a single store update — O(N) vs O(N²) for N entries. */
   mergeSequences: (batch: Map<string, ChainSeq[]>) => void
   clearAll: () => void
 }
 
 export const useSequenceStore = create<SequenceStore>((set) => ({
-  sequences: new Map(),
+  sequencesByPath: new Map(),
 
-  setSequences: (name, chains) =>
+  setSequences: (filePath, chains) =>
     set(s => {
-      const next = new Map(s.sequences)
-      next.set(name, chains)
-      return { sequences: next }
+      const next = new Map(s.sequencesByPath)
+      next.set(filePath, chains)
+      return { sequencesByPath: next }
     }),
 
   mergeSequences: (batch) =>
     set(s => {
-      const next = new Map(s.sequences)
-      for (const [name, chains] of batch) next.set(name, chains)
-      return { sequences: next }
+      const next = new Map(s.sequencesByPath)
+      for (const [filePath, chains] of batch) next.set(filePath, chains)
+      return { sequencesByPath: next }
     }),
 
-  clearAll: () => set({ sequences: new Map() }),
+  clearAll: () => set({ sequencesByPath: new Map() }),
 }))
