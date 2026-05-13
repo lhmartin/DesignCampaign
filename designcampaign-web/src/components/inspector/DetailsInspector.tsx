@@ -46,6 +46,82 @@ function fmtNum(v: number | undefined): string {
   return v.toFixed(2)
 }
 
+// ── Metric name organization ────────────────────────────────────────────────
+// Real-world metric keys often share long prefixes (e.g. dotted JSON paths
+// like `payload.job_status.response_payload.*`). organizeMetrics() strips the
+// longest common prefix shared by all keys, then sub-groups remaining names
+// by their leading token when 2+ share one.
+
+type MetricEntry = { key: string; label: string }
+type MetricGroup = { prefix: string | null; entries: MetricEntry[] }
+
+function stringLcp(strs: string[]): string {
+  if (strs.length === 0) return ''
+  let lcp = strs[0]
+  for (let i = 1; i < strs.length; i++) {
+    while (!strs[i].startsWith(lcp)) {
+      lcp = lcp.slice(0, -1)
+      if (!lcp) return ''
+    }
+  }
+  return lcp
+}
+
+// Trim a prefix back to its last '.' or '_' (inclusive) so we don't cut a token.
+function trimToSeparator(s: string): string {
+  const at = Math.max(s.lastIndexOf('.'), s.lastIndexOf('_'))
+  return at === -1 ? '' : s.slice(0, at + 1)
+}
+
+function safeCommonPrefix(keys: string[]): string {
+  const lcp = trimToSeparator(stringLcp(keys))
+  return lcp && keys.every(k => k.length > lcp.length) ? lcp : ''
+}
+
+export function organizeMetrics(keys: string[]): { sectionPrefix: string; groups: MetricGroup[] } {
+  if (keys.length === 0) return { sectionPrefix: '', groups: [] }
+  if (keys.length === 1) {
+    return { sectionPrefix: '', groups: [{ prefix: null, entries: [{ key: keys[0], label: keys[0] }] }] }
+  }
+
+  const sectionPrefix = safeCommonPrefix(keys)
+  const stripped = keys.map(k => k.slice(sectionPrefix.length))
+
+  const order: string[] = []
+  const buckets = new Map<string, number[]>()
+  stripped.forEach((s, i) => {
+    const head = /^([^._]+)/.exec(s)?.[1] ?? ''
+    if (!buckets.has(head)) {
+      buckets.set(head, [])
+      order.push(head)
+    }
+    buckets.get(head)!.push(i)
+  })
+
+  const groups: MetricGroup[] = []
+  for (const head of order) {
+    const idxs = buckets.get(head)!
+    if (idxs.length < 2) {
+      const i = idxs[0]
+      groups.push({ prefix: null, entries: [{ key: keys[i], label: stripped[i] }] })
+      continue
+    }
+    const subNames = idxs.map(i => stripped[i])
+    const subPrefix = safeCommonPrefix(subNames)
+    if (subPrefix) {
+      groups.push({
+        prefix: subPrefix.replace(/[._]$/, ''),
+        entries: idxs.map((i, j) => ({ key: keys[i], label: subNames[j].slice(subPrefix.length) })),
+      })
+    } else {
+      for (let j = 0; j < idxs.length; j++) {
+        groups.push({ prefix: null, entries: [{ key: keys[idxs[j]], label: subNames[j] }] })
+      }
+    }
+  }
+  return { sectionPrefix: sectionPrefix.replace(/[._]$/, ''), groups }
+}
+
 export function DetailsInspector() {
   const activeFile = useFileStore(s => s.activeFile)
   // Narrow the metrics selector so unrelated row updates don't re-render the inspector.
@@ -129,12 +205,51 @@ export function DetailsInspector() {
             </div>
           )
         }
-        return ordered.map(key => (
-          <div key={key} style={rowStyle}>
-            <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={key}>{key}</span>
-            <span style={valStyle}>{fmtNum(m[key])}</span>
-          </div>
-        ))
+        const { sectionPrefix, groups } = organizeMetrics(ordered)
+        return (
+          <>
+            {sectionPrefix && (
+              <div style={{
+                padding: '4px 12px 6px',
+                fontSize: 10,
+                color: 'var(--color-text-disabled)',
+                fontFamily: 'JetBrains Mono, monospace',
+                wordBreak: 'break-all',
+              }} title={sectionPrefix}>
+                {sectionPrefix}.…
+              </div>
+            )}
+            {groups.map((g, gi) => g.prefix ? (
+              <div key={gi}>
+                <div style={{
+                  padding: '6px 12px 2px',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  color: 'var(--color-text-secondary)',
+                }}>
+                  {g.prefix}
+                </div>
+                {g.entries.map(e => (
+                  <div key={e.key} style={{ ...rowStyle, paddingLeft: 20 }}>
+                    <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
+                    <span style={valStyle}>{fmtNum(m[e.key])}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div key={gi}>
+                {g.entries.map(e => (
+                  <div key={e.key} style={rowStyle}>
+                    <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={e.key}>{e.label}</span>
+                    <span style={valStyle}>{fmtNum(m[e.key])}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </>
+        )
       })()}
 
       <div style={sectionHeaderStyle}>Selection</div>
