@@ -40,8 +40,6 @@ const valStyle: React.CSSProperties = {
   maxWidth: '60%',
 }
 
-const KEY_METRICS = ['mean_plddt', 'mean_bfactor', 'num_residues', 'chain_count'] as const
-
 function fmtNum(v: number | undefined): string {
   if (v === undefined || Number.isNaN(v)) return '—'
   if (Number.isInteger(v)) return v.toString()
@@ -56,6 +54,8 @@ export function DetailsInspector() {
     const stem = getFileStem(activeFile)
     return s.rows.find(r => r.filePath === activeFile) ?? s.rows.find(r => r.name === stem)
   })
+  // Use the store's column order so the inspector matches the metrics table.
+  const allColumns = useMetricsStore(s => s.allColumns)
   const selectedResidues = useSelectionStore(s => s.selectedResidues)
   const paratopeSize = useInterfaceStore(s => s.paratope.size)
   const epitopeSize  = useInterfaceStore(s => s.epitope.size)
@@ -110,12 +110,32 @@ export function DetailsInspector() {
       </div>
 
       <div style={sectionHeaderStyle}>Metrics</div>
-      {KEY_METRICS.map(key => (
-        <div key={key} style={rowStyle}>
-          <span style={keyStyle}>{key}</span>
-          <span style={valStyle}>{fmtNum(metricsRow?.metrics[key])}</span>
-        </div>
-      ))}
+      {(() => {
+        const m = metricsRow?.metrics
+        if (!m) {
+          return (
+            <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
+              <span>No metrics for this file</span>
+            </div>
+          )
+        }
+        const cols = allColumns.filter(c => c in m)
+        const extra = Object.keys(m).filter(k => !allColumns.includes(k))
+        const ordered = [...cols, ...extra]
+        if (ordered.length === 0) {
+          return (
+            <div style={{ ...rowStyle, color: 'var(--color-text-disabled)' }}>
+              <span>No metrics for this file</span>
+            </div>
+          )
+        }
+        return ordered.map(key => (
+          <div key={key} style={rowStyle}>
+            <span style={{ ...keyStyle, overflow: 'hidden', textOverflow: 'ellipsis' }} title={key}>{key}</span>
+            <span style={valStyle}>{fmtNum(m[key])}</span>
+          </div>
+        ))
+      })()}
 
       <div style={sectionHeaderStyle}>Selection</div>
       {selectionSummary ? (
