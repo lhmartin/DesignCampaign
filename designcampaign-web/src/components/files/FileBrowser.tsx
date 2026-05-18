@@ -4,7 +4,7 @@ import { useFileStore } from '@/stores/file-store'
 import { useProteinStore } from '@/stores/protein-store'
 import { useGroupStore } from '@/stores/group-store'
 import { useMetricsStore } from '@/stores/metrics-store'
-import { useFilterStore } from '@/stores/filter-store'
+import { useFilterStore, ruleIsActive } from '@/stores/filter-store'
 import { formatFileSize } from '@/lib/utils'
 import type { MolstarViewerHandle } from '@/components/viewer/MolstarViewer'
 import type { FileInfo } from '@/types/electron'
@@ -448,7 +448,7 @@ function FileRow({
   const { showFilteredInBrowser, rules, passesFilters } = useFilterStore()
   const metrics = useMetricsStore(s => s.rows.find(r => r.filePath === file.path)?.metrics)
   const isFilteredOut = showFilteredInBrowser
-    && rules.some(r => r.type === 'residue' ? !!(r.residues?.trim()) : r.type === 'liability' ? r.presets.length > 0 || r.customPatterns.length > 0 : !!r.metric)
+    && rules.some(ruleIsActive)
     && metrics !== undefined
     && !passesFilters(metrics, file.path)
 

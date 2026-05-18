@@ -124,7 +124,7 @@ function ConnectionRow({ conn, onConnect, onDelete }: {
       padding: '10px 12px',
       borderRadius: 8,
       border: '1px solid var(--color-border)',
-      background: 'var(--color-primary-bg)',
+      background: 'var(--color-background)',
     }}>
       <ProviderBadge provider={conn.provider} />
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -211,7 +211,7 @@ function AddView({ onSaved, onCancel }: {
             onClick={() => { setProvider(p); resetTestResult() }}
             style={{
               padding: '6px 16px', fontSize: 12, fontWeight: 500, border: 'none', cursor: 'pointer',
-              background: provider === p ? 'var(--color-accent)' : 'var(--color-primary-bg)',
+              background: provider === p ? 'var(--color-accent)' : 'var(--color-background)',
               color: provider === p ? 'white' : 'var(--color-text-secondary)',
             }}
           >
@@ -359,7 +359,7 @@ const inputStyle: React.CSSProperties = {
   padding: '7px 10px',
   borderRadius: 6,
   border: '1px solid var(--color-border)',
-  background: 'var(--color-primary-bg)',
+  background: 'var(--color-background)',
   color: 'var(--color-text-primary)',
   fontSize: 12,
   width: '100%',
@@ -375,7 +375,7 @@ const primaryBtnStyle: React.CSSProperties = {
 
 const secondaryBtnStyle: React.CSSProperties = {
   padding: '7px 16px', borderRadius: 6,
-  background: 'var(--color-primary-bg)',
+  background: 'var(--color-background)',
   color: 'var(--color-text-primary)',
   border: '1px solid var(--color-border)',
   cursor: 'pointer', fontSize: 12,

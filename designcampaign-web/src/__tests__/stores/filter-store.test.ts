@@ -437,6 +437,26 @@ describe('passesFilters — liability rules', () => {
     expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(false)
   })
 
+  it('exposedOnly: skips buried match and finds the next exposed match in the same sequence', () => {
+    // Regression: pre-/g-flag the filter looped forever on the first match when
+    // it failed the exposedOnly check. Now the regex must advance lastIndex and
+    // discover the second NG occurrence.
+    addLiabilityRule({ presets: ['NG'], chainMode: 'all', exposedOnly: true })
+    const seq = 'NGAAAANG'  // NG at index 0 (buried) and index 6 (exposed)
+    const exposedMask = [false, false, false, false, false, false, true, true]
+    seedSequence('A', seq, exposedMask)
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(false)
+  })
+
+  it('exposedOnly: terminates and passes when every match is buried', () => {
+    // Same regression — even with no second match, the loop must terminate.
+    addLiabilityRule({ presets: ['NG'], chainMode: 'all', exposedOnly: true })
+    const seq = 'NGAAAANG'  // two NGs, both buried
+    const exposedMask = seq.split('').map(() => false)
+    seedSequence('A', seq, exposedMask)
+    expect(useFilterStore.getState().passesFilters({}, filePath)).toBe(true)
+  })
+
   it('liability rule persists and round-trips through preset export/import', () => {
     addLiabilityRule({ presets: ['NG', 'DG'], chainMode: 'all' })
     useFilterStore.getState().savePreset('liabilityPreset')

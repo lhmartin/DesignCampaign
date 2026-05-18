@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { useFilterStore, type ComparisonOp, type RankingMode, type RankingMetric, type FilterRule, type NumericFilterRule, type ResidueFilterRule, type LiabilityFilterRule } from '@/stores/filter-store'
+import { useFilterStore, ruleIsActive, type ComparisonOp, type RankingMode, type RankingMetric, type FilterRule, type NumericFilterRule, type ResidueFilterRule, type LiabilityFilterRule } from '@/stores/filter-store'
 import { useMetricsStore, type ProteinMetrics } from '@/stores/metrics-store'
 import { useBatchInterfaceStore } from '@/stores/batch-interface-store'
 import { useInterfaceStore } from '@/stores/interface-store'
@@ -796,11 +796,7 @@ export function FilterPanel() {
   // Filter out virtual columns from numeric filter rule dropdowns
   const numericColumns = allColumns.filter(c => c !== 'paratope_residues' && c !== 'epitope_residues')
 
-  const activeRuleCount = rules.filter(r => {
-    if (r.type === 'residue')   return !!(r.residues?.trim())
-    if (r.type === 'liability') return r.presets.length > 0 || r.customPatterns.length > 0
-    return !!(r as NumericFilterRule).metric
-  }).length
+  const activeRuleCount = rules.filter(ruleIsActive).length
   const activeRankingMetrics = rankingMetrics.filter(m => m.active)
   const activeRankingCount   = activeRankingMetrics.length
 

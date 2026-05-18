@@ -188,13 +188,15 @@ export const CATEGORY_LABELS: Record<LiabilityCategory, string> = {
  *   AxC  → matches ATC  (3 chars)
  *   AxxC → matches ATTC (4 chars)
  * Returns null if the pattern is empty or produces an invalid regex.
+ * The /g flag is required: the filter scans for multiple non-overlapping
+ * matches via exec() and relies on lastIndex advancing between calls.
  */
 export function customPatternToRegex(pattern: string): RegExp | null {
   if (!pattern.trim()) return null
   // Escape regex-special chars first, then replace x → single-AA wildcard
   const escaped   = pattern.replace(/[.+*?^${}()|[\]\\]/g, '\\$&')
   const regexStr  = escaped.replace(/x/g, '[A-Z]')
-  try { return new RegExp(regexStr) } catch { return null }
+  try { return new RegExp(regexStr, 'g') } catch { return null }
 }
 
 /** Module-level regex cache to avoid recompilation on every passesFilters call. */
@@ -203,7 +205,7 @@ const _regexCache = new Map<string, RegExp>()
 export function getCachedRegex(pattern: string): RegExp {
   let re = _regexCache.get(pattern)
   if (!re) {
-    re = new RegExp(pattern)
+    re = new RegExp(pattern, 'g')
     _regexCache.set(pattern, re)
   }
   return re

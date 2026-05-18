@@ -38,6 +38,13 @@ export interface LiabilityFilterRule {
 
 export type FilterRule = NumericFilterRule | ResidueFilterRule | LiabilityFilterRule
 
+/** True when the rule is configured enough to affect the result set. */
+export function ruleIsActive(rule: FilterRule): boolean {
+  if (rule.type === 'residue')   return !!rule.residues?.trim()
+  if (rule.type === 'liability') return rule.presets.length > 0 || rule.customPatterns.length > 0
+  return !!rule.metric
+}
+
 // ─── Per-rule pattern cache ───────────────────────────────────────────────────
 // Keyed on the rule object itself. Zustand replaces the rule object on any
 // update, so stale entries are GC'd automatically — no manual invalidation needed.

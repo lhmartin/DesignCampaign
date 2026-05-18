@@ -117,7 +117,8 @@ function getGcsClient(id: string): { storage: Storage; bucket: string } {
 const STRUCTURE_EXTS = new Set(['.pdb', '.cif', '.mmcif', '.json'])
 
 function extOf(name: string): string {
-  return name.slice(name.lastIndexOf('.')).toLowerCase()
+  const i = name.lastIndexOf('.')
+  return i === -1 ? '' : name.slice(i).toLowerCase()
 }
 
 async function listAzureBlobs(sasUrl: string, prefix: string): Promise<FileInfo[]> {
@@ -165,6 +166,17 @@ export function registerCloudHandlers(): void {
   })
 
   ipcMain.handle('cloud:add-connection', async (_e, input: AddConnectionInput) => {
+    // Refuse to store credentials when the OS keyring is unavailable — safeStorage
+    // would otherwise silently fall back to plaintext obfuscation, which users
+    // would reasonably mistake for real encryption.
+    if (!safeStorage.isEncryptionAvailable()) {
+      return {
+        ok: false,
+        error: 'OS keyring not available; refusing to store credentials in plaintext. '
+             + 'Install/unlock a keyring (gnome-keyring, KWallet) and retry.',
+      }
+    }
+
     // Validate by running a lightweight test first
     const testResult = await runTest(input)
     if (!testResult.ok) return { ok: false, error: testResult.error }
@@ -189,7 +201,9 @@ export function registerCloudHandlers(): void {
         createdAt: Date.now(),
       }
     } else {
-      const saJson = JSON.parse(input.serviceAccountJson!)
+      // runTest already validated this parses; one more parse here to read
+      // client_email for the display meta.
+      const saJson = JSON.parse(input.serviceAccountJson!) as { client_email?: string }
       sensitive = { provider: 'gcs', serviceAccountJson: input.serviceAccountJson!, bucket: input.gcsBucket! }
       meta = {
         id,
@@ -244,12 +258,26 @@ export function registerCloudHandlers(): void {
   })
 
   ipcMain.handle('cloud:read-file', async (_e, { path: virtualPath }: { path: string }): Promise<string> => {
+    if (!virtualPath.startsWith('cloud://')) {
+      throw new Error(`Not a cloud path: ${virtualPath}`)
+    }
     const withoutScheme = virtualPath.slice('cloud://'.length)
     const firstSlash = withoutScheme.indexOf('/')
     const secondSlash = withoutScheme.indexOf('/', firstSlash + 1)
+    if (firstSlash === -1 || secondSlash === -1) {
+      throw new Error(`Malformed cloud path: ${virtualPath}`)
+    }
     const provider = withoutScheme.slice(0, firstSlash) as 'azure' | 'gcs'
     const connectionId = withoutScheme.slice(firstSlash + 1, secondSlash)
     const blobName = withoutScheme.slice(secondSlash + 1)
+
+    // Cross-check the path's connection id against the index so a stale URL
+    // produces a clear error rather than an opaque ENOENT from decryptSensitive.
+    const meta = readIndex().find(c => c.id === connectionId)
+    if (!meta) throw new Error(`Cloud connection not found: ${connectionId}`)
+    if (meta.provider !== provider) {
+      throw new Error(`Provider mismatch for ${connectionId}: path says ${provider}, stored as ${meta.provider}`)
+    }
 
     if (provider === 'azure') {
       const client = getAzureClient(connectionId)

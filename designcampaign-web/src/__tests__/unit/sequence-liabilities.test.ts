@@ -1,52 +1,60 @@
 import { describe, it, expect } from 'vitest'
 import { customPatternToRegex, getCachedRegex, LIABILITY_PRESETS } from '@/lib/sequence-liabilities'
 
+// Factories return /g-flagged regexes; test() advances lastIndex between calls,
+// so every assertion uses a fresh regex via this helper.
+function matches(pattern: string, seq: string): boolean {
+  const re = customPatternToRegex(pattern)
+  return re !== null && re.test(seq)
+}
+
 describe('customPatternToRegex', () => {
   it('returns null for empty string', () => {
     expect(customPatternToRegex('')).toBeNull()
     expect(customPatternToRegex('   ')).toBeNull()
   })
 
-  it('returns null for invalid regex', () => {
-    expect(customPatternToRegex('A[C')).toBeNull()
-    expect(customPatternToRegex('A(')).toBeNull()
+  it('escapes regex metacharacters so any input is safe to compile', () => {
+    // The escape pass means [, (, etc. become literal — they no longer break
+    // the regex. The catch branch remains as defense in depth.
+    const re = customPatternToRegex('A[C')!
+    expect(re).not.toBeNull()
+    expect(re.test('A[C')).toBe(true)
+    expect(re.test('ABC')).toBe(false)
+  })
+
+  it('compiles with the /g flag so exec() can advance through a sequence', () => {
+    expect(customPatternToRegex('NG')!.flags).toContain('g')
   })
 
   it('matches exact sequences without wildcards', () => {
-    const re = customPatternToRegex('NG')!
-    expect(re).not.toBeNull()
-    expect(re.test('ANG')).toBe(true)
-    expect(re.test('NGA')).toBe(true)
-    expect(re.test('ANA')).toBe(false)
+    expect(matches('NG', 'ANG')).toBe(true)
+    expect(matches('NG', 'NGA')).toBe(true)
+    expect(matches('NG', 'ANA')).toBe(false)
   })
 
   it('treats lowercase x as exactly one amino acid', () => {
-    const re = customPatternToRegex('AxC')!
-    expect(re).not.toBeNull()
-    expect(re.test('ATC')).toBe(true)    // A, T, C — one AA in middle
-    expect(re.test('AGC')).toBe(true)
-    expect(re.test('AC')).toBe(false)    // no middle AA
-    expect(re.test('ATTC')).toBe(false)  // two AAs in middle
+    expect(matches('AxC', 'ATC')).toBe(true)    // A, T, C — one AA in middle
+    expect(matches('AxC', 'AGC')).toBe(true)
+    expect(matches('AxC', 'AC')).toBe(false)    // no middle AA
+    expect(matches('AxC', 'ATTC')).toBe(false)  // two AAs in middle
   })
 
   it('AxxC requires exactly two amino acids', () => {
-    const re = customPatternToRegex('AxxC')!
-    expect(re.test('ATTC')).toBe(true)
-    expect(re.test('ATC')).toBe(false)   // only one
-    expect(re.test('ATTTC')).toBe(false) // three
+    expect(matches('AxxC', 'ATTC')).toBe(true)
+    expect(matches('AxxC', 'ATC')).toBe(false)   // only one
+    expect(matches('AxxC', 'ATTTC')).toBe(false) // three
   })
 
   it('escapes regex special characters in the pattern', () => {
-    const re = customPatternToRegex('A.C')!
-    expect(re.test('ABC')).toBe(false)   // . is escaped, not a wildcard
-    expect(re.test('A.C')).toBe(true)
+    expect(matches('A.C', 'ABC')).toBe(false)    // . is escaped, not a wildcard
+    expect(matches('A.C', 'A.C')).toBe(true)
   })
 
   it('uppercase letters remain literal', () => {
-    const re = customPatternToRegex('NxS')!
-    expect(re.test('NAS')).toBe(true)
-    expect(re.test('NTS')).toBe(true)
-    expect(re.test('MAS')).toBe(false)   // first AA must be N
+    expect(matches('NxS', 'NAS')).toBe(true)
+    expect(matches('NxS', 'NTS')).toBe(true)
+    expect(matches('NxS', 'MAS')).toBe(false)    // first AA must be N
   })
 })
 
@@ -79,16 +87,14 @@ describe('LIABILITY_PRESETS', () => {
 
   it('NG preset matches NG in a sequence', () => {
     const p = LIABILITY_PRESETS.find(p => p.id === 'NG')!
-    const re = new RegExp(p.pattern)
-    expect(re.test('QVQLNG')).toBe(true)
-    expect(re.test('QVQLNS')).toBe(false)
+    expect(new RegExp(p.pattern).test('QVQLNG')).toBe(true)
+    expect(new RegExp(p.pattern).test('QVQLNS')).toBe(false)
   })
 
   it('NGLYC preset matches N-X-S/T sequon (X != P)', () => {
     const p = LIABILITY_PRESETS.find(p => p.id === 'NGLYC')!
-    const re = new RegExp(p.pattern)
-    expect(re.test('QNAST')).toBe(true)   // NAS = N[A]S → matches
-    expect(re.test('QNPST')).toBe(false)  // NPS = N[P]S → no match (X=P excluded)
-    expect(re.test('QNATT')).toBe(true)   // NAT = N[A]T → matches
+    expect(new RegExp(p.pattern).test('QNAST')).toBe(true)   // NAS = N[A]S → matches
+    expect(new RegExp(p.pattern).test('QNPST')).toBe(false)  // NPS = N[P]S → no match (X=P excluded)
+    expect(new RegExp(p.pattern).test('QNATT')).toBe(true)   // NAT = N[A]T → matches
   })
 })
